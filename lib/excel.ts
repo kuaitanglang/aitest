@@ -416,42 +416,10 @@ export function findDuplicateExternalCodes(items: OrderItem[]): Map<string, numb
 export function findAllDuplicates(items: OrderItem[]): { field: OrderItemField; duplicates: Map<string, number[]> }[] {
   const results: { field: OrderItemField; duplicates: Map<string, number[]> }[] = [];
 
-  // 外部编码去重
+  // 只有外部编码需要去重
   const externalCodeDuplicates = findDuplicateExternalCodes(items);
   if (externalCodeDuplicates.size > 0) {
     results.push({ field: 'externalCode', duplicates: externalCodeDuplicates });
-  }
-
-  // 收件人电话去重
-  const receiverPhoneMap = new Map<string, number[]>();
-  items.forEach((item, index) => {
-    if (item.receiverPhone && item.receiverPhone.trim()) {
-      const phone = item.receiverPhone.trim().replace(/\s/g, '');
-      if (!receiverPhoneMap.has(phone)) {
-        receiverPhoneMap.set(phone, []);
-      }
-      receiverPhoneMap.get(phone)!.push(index);
-    }
-  });
-  const receiverPhoneDuplicates = new Map([...receiverPhoneMap].filter(([, indices]) => indices.length > 1));
-  if (receiverPhoneDuplicates.size > 0) {
-    results.push({ field: 'receiverPhone', duplicates: receiverPhoneDuplicates });
-  }
-
-  // 发件人电话去重
-  const senderPhoneMap = new Map<string, number[]>();
-  items.forEach((item, index) => {
-    if (item.senderPhone && item.senderPhone.trim()) {
-      const phone = item.senderPhone.trim().replace(/\s/g, '');
-      if (!senderPhoneMap.has(phone)) {
-        senderPhoneMap.set(phone, []);
-      }
-      senderPhoneMap.get(phone)!.push(index);
-    }
-  });
-  const senderPhoneDuplicates = new Map([...senderPhoneMap].filter(([, indices]) => indices.length > 1));
-  if (senderPhoneDuplicates.size > 0) {
-    results.push({ field: 'senderPhone', duplicates: senderPhoneDuplicates });
   }
 
   return results;
@@ -466,17 +434,14 @@ export function applyDuplicateValidation(items: OrderItem[], dbDuplicates?: Set<
     allDuplicates.forEach(({ field, duplicates }) => {
       let value = '';
       if (field === 'externalCode') value = (item.externalCode || '').trim();
-      else if (field === 'receiverPhone') value = (item.receiverPhone || '').trim().replace(/\s/g, '');
-      else if (field === 'senderPhone') value = (item.senderPhone || '').trim().replace(/\s/g, '');
 
       if (value && duplicates.has(value)) {
         const indices = duplicates.get(value)!;
         if (indices.indexOf(index) > 0) {
           const firstRow = indices[0] + 1;
-          const fieldLabel = field === 'externalCode' ? '外部编码' : field === 'receiverPhone' ? '收件人电话' : '发件人电话';
           newErrors.push({
             field,
-            message: `${fieldLabel}重复（与第${firstRow}行重复）`
+            message: `外部编码重复（与第${firstRow}行重复）`
           });
         }
       }
