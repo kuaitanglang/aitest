@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import 'antd/dist/reset.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f0f2f5;
+}
+
+input, select, button, textarea {
+  font-family: inherit;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+/* 动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* 错误行高亮 */
+.error-row {
+  background-color: #fff1f0 !important;
+  transition: background-color 0.3s ease;
+}
+
+.error-row:hover > td {
+  background-color: #ffe7e6 !important;
+}
+
+/* 错误输入框样式增强 */
+.ant-input-status-error,
+.ant-select-status-error .ant-select-selector {
+  border-color: #ff4d4f !important;
+  background-color: #fff1f0;
+}
+
+.ant-input-status-error:focus,
+.ant-input-status-error:hover,
+.ant-select-status-error.ant-select-focused .ant-select-selector,
+.ant-select-status-error:hover .ant-select-selector {
+  border-color: #ff4d4f !important;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.2) !important;
+}
