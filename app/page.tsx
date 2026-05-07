@@ -252,7 +252,7 @@ export default function Home() {
                     ...item,
                     errors: [
                       ...item.errors,
-                      { field: 'externalCode', message: '外部编码已存在于数据库中' },
+                      { field: 'externalCode' as OrderItemField, message: '外部编码已存在于数据库中' },
                     ],
                   };
                 }
@@ -327,7 +327,7 @@ export default function Home() {
                   ...item,
                   errors: [
                     ...item.errors.filter(e => e.field !== 'externalCode' || !e.message.includes('数据库')),
-                    { field: 'externalCode', message: '外部编码已存在于数据库中' },
+                    { field: 'externalCode' as OrderItemField, message: '外部编码已存在于数据库中' },
                   ],
                 }
               : item

@@ -308,7 +308,7 @@ export default function UploadPage() {
       </Card>
 
       <div className="mx-4 mt-4">
-        {!showPreview && !submitResult && (
+        {!showPreview && (
           <Card className="max-w-3xl mx-auto" bordered={false}>
             <Upload {...fileProps}>
               <Button icon={<UploadOutlined />} size="large" className="w-full h-32 flex flex-col justify-center" disabled={isImporting}>
@@ -347,7 +347,7 @@ export default function UploadPage() {
           </Card>
         )}
 
-        {showPreview && !submitResult && (
+        {showPreview && (
           <Card bordered={false}>
             <div className="flex flex-wrap items-center justify-between mb-4 gap-4">
               <Space>
