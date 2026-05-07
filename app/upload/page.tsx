@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Button, Table, Input, Select, message, Modal, Progress, Card, Tag, Space } from 'antd';
 import { UploadOutlined, PlusOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ArrowLeftOutlined, SendOutlined, CheckOutlined, WarningOutlined } from '@ant-design/icons';
-import { parseExcelFile, autoDetectMappings, findMatchingTemplate, saveTemplateRule, convertToOrderItems, validateOrderItem, exportToExcel, findDuplicateExternalCodes, checkDuplicatesInDatabase } from '@/lib/excel';
+import { parseExcelFile, autoDetectMappings, findMatchingTemplate, saveTemplateRule, convertToOrderItems, validateOrderItem, exportToExcel, findDuplicateExternalCodes, checkDuplicatesInDatabase, applyDuplicateValidation } from '@/lib/excel';
 import { supabase } from '@/lib/supabase';
 import { OrderItem, ColumnMapping, SYSTEM_FIELDS, REQUIRED_FIELDS, TEMPERATURE_OPTIONS, OrderItemField } from '@/types';
 import type { UploadProps } from 'antd';
@@ -17,7 +17,6 @@ export default function UploadPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [importProgress, setImportProgress] = useState({ progress: 0, current: 0, total: 0 });
   const [isImporting, setIsImporting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<{ success: number; failed: number } | null>(null);
   const editingCellRef = useRef<any>(null);
 
   useEffect(() => {
@@ -69,30 +68,12 @@ export default function UploadPage() {
       const orderItems = convertToOrderItems(data, detectedMappings);
       
       setImportProgress({ progress: 80, current: 4, total: 5 });
-      const duplicates = findDuplicateExternalCodes(orderItems);
       const externalCodes = orderItems.map(item => item.externalCode.trim()).filter(Boolean);
       const dbDuplicates = await checkDuplicatesInDatabase(externalCodes);
-      
-      orderItems.forEach((item, index) => {
-        const code = item.externalCode.trim();
-        if (code && duplicates.has(code)) {
-          const indices = duplicates.get(code)!;
-          if (indices.indexOf(index) > 0) {
-            item.errors.push({
-              field: 'externalCode',
-              message: `外部编码重复（与第${indices[0] + 1}行重复）`
-            });
-          }
-        }
-        if (code && dbDuplicates.has(code)) {
-          item.errors.push({
-            field: 'externalCode',
-            message: `外部编码已存在于数据库中`
-          });
-        }
-      });
 
-      setItems(orderItems);
+      const validatedItems = applyDuplicateValidation(orderItems, dbDuplicates);
+
+      setItems(validatedItems);
       setImportProgress({ progress: 100, current: 5, total: 5 });
       setShowPreview(true);
     } catch (error) {
@@ -184,7 +165,12 @@ export default function UploadPage() {
     setIsImporting(false);
     setShowPreview(false);
     setItems([]);
-    setSubmitResult({ success, failed });
+
+    if (failed === 0) {
+      message.success(`✅ 成功提交 ${success} 条订单`);
+    } else {
+      message.warning(`⚠️ 提交完成：${success} 条成功，${failed} 条失败`);
+    }
   }, [items]);
 
   const handleCellChange = (rowIndex: number, field: OrderItemField, value: string) => {
@@ -194,7 +180,9 @@ export default function UploadPage() {
       [field]: value,
       errors: validateOrderItem({ ...newItems[rowIndex], [field]: value }),
     };
-    setItems(newItems);
+
+    const validatedItems = applyDuplicateValidation(newItems);
+    setItems(validatedItems);
   };
 
   const handleAddRow = () => {
@@ -428,29 +416,6 @@ export default function UploadPage() {
           </div>
         </div>
       </Modal>
-
-      {submitResult && (
-        <Modal title="提交结果" visible={submitResult !== null} onCancel={() => setSubmitResult(null)} footer={[
-          <Button key="submit" type="primary" onClick={() => setSubmitResult(null)}>确定</Button>,
-        ]}>
-          <div className="text-center py-8">
-            {submitResult.success === submitResult.success + submitResult.failed ? (
-              <CheckOutlined className="w-16 h-16 text-green-500 mx-auto mb-4" />
-            ) : (
-              <WarningOutlined className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
-            )}
-            <h3 className="text-xl font-bold mb-4">{submitResult.success === submitResult.success + submitResult.failed ? '提交成功' : '部分提交成功'}</h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="p-4 bg-gray-50 rounded-lg"><p className="text-2xl font-bold">{submitResult.success + submitResult.failed}</p><p className="text-sm text-gray-500">总条数</p></div>
-              <div className="p-4 bg-green-50 rounded-lg"><p className="text-2xl font-bold text-green-600">{submitResult.success}</p><p className="text-sm text-green-600">成功</p></div>
-              <div className="p-4 bg-red-50 rounded-lg"><p className="text-2xl font-bold text-red-600">{submitResult.failed}</p><p className="text-sm text-red-600">失败</p></div>
-            </div>
-            <div className="mt-4">
-              <Link href="/history"><Button type="primary" block size="large">查看历史记录</Button></Link>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

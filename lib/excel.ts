@@ -5,26 +5,59 @@ import { supabase } from '@/lib/supabase';
 function isHeaderRow(row: string[]): boolean {
   const headerKeywords = ['外部编码', '发件人', '收件人', '重量', '件数', '温层', '备注', 'external', 'sender', 'receiver', 'weight', 'quantity', 'temperature'];
   const rowStr = row.join(' ').toLowerCase();
-  
+
   const matchCount = headerKeywords.filter(keyword => rowStr.includes(keyword.toLowerCase())).length;
-  
+
   return matchCount >= 2;
 }
 
 function findHeaderRow(worksheet: XLSX.WorkSheet, range: XLSX.Range): number {
-  for (let r = range.s.r; r <= Math.min(range.s.r + 5, range.e.r); r++) {
+  for (let r = range.s.r; r <= Math.min(range.s.r + 10, range.e.r); r++) {
     const rowValues: string[] = [];
     for (let c = range.s.c; c <= range.e.c; c++) {
       const cell = worksheet[XLSX.utils.encode_cell({ r, c })];
       rowValues.push((cell?.v || '').toString().trim());
     }
-    
+
     if (isHeaderRow(rowValues)) {
       return r;
     }
   }
-  
+
   return 0;
+}
+
+function expandMergedCells(worksheet: XLSX.WorkSheet, range: XLSX.Range): void {
+  if (!worksheet['!merges']) {
+    return;
+  }
+
+  const merges: XLSX.Range[] = worksheet['!merges'];
+
+  merges.forEach((mergeRange) => {
+    const topLeftCell = worksheet[XLSX.utils.encode_cell({ r: mergeRange.s.r, c: mergeRange.s.c })];
+
+    if (!topLeftCell) {
+      return;
+    }
+
+    const topLeftValue = topLeftCell.v;
+
+    for (let r = mergeRange.s.r; r <= mergeRange.e.r; r++) {
+      for (let c = mergeRange.s.c; c <= mergeRange.e.c; c++) {
+        if (r === mergeRange.s.r && c === mergeRange.s.c) {
+          continue;
+        }
+
+        const cellRef = XLSX.utils.encode_cell({ r, c });
+        if (!worksheet[cellRef]) {
+          worksheet[cellRef] = { t: topLeftCell.t || 's', v: topLeftValue };
+        } else {
+          worksheet[cellRef].v = topLeftValue;
+        }
+      }
+    }
+  });
 }
 
 export function parseExcelFile(file: File): Promise<{ headers: string[]; data: Record<string, string>[][] }> {
@@ -34,58 +67,100 @@ export function parseExcelFile(file: File): Promise<{ headers: string[]; data: R
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        
+
         if (!workbook.SheetNames.length) {
           reject(new Error('Excel文件中没有工作表'));
           return;
         }
-        
+
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
+
         if (!worksheet['!ref']) {
           reject(new Error('Excel文件为空'));
           return;
         }
-        
+
         const range = XLSX.utils.decode_range(worksheet['!ref']);
+
+        expandMergedCells(worksheet, range);
+
         const headerRowIndex = findHeaderRow(worksheet, range);
-        
+
         const headers: string[] = [];
         for (let c = range.s.c; c <= range.e.c; c++) {
           const cell = worksheet[XLSX.utils.encode_cell({ r: headerRowIndex, c })];
-          headers.push((cell?.v || '').toString().trim());
+          let headerValue = (cell?.v || '').toString().trim();
+          
+          if (!headerValue) {
+            let searchR = headerRowIndex - 1;
+            while (searchR >= Math.max(0, headerRowIndex - 3)) {
+              const aboveCell = worksheet[XLSX.utils.encode_cell({ r: searchR, c })];
+              if (aboveCell?.v) {
+                headerValue = aboveCell.v.toString().trim();
+                break;
+              }
+              searchR--;
+            }
+          }
+          
+          headers.push(headerValue || `列${c + 1}`);
         }
+
+        const filteredHeaders = headers.filter(h => h && !h.match(/^列\d+$/));
         
-        if (headers.every(h => !h)) {
-          reject(new Error('无法识别表头，请检查Excel格式'));
+        if (filteredHeaders.length < 2) {
+          reject(new Error('无法识别表头，请检查Excel格式（确保包含"发件人"、"收件人"、"重量"等字段）'));
           return;
         }
-        
+
         const dataRows: Record<string, string>[][] = [];
         for (let r = headerRowIndex + 1; r <= range.e.r; r++) {
           const row: Record<string, string>[] = [];
           let hasData = false;
-          
+
           for (let c = range.s.c; c <= range.e.c; c++) {
-            const cell = worksheet[XLSX.utils.encode_cell({ r, c })];
+            let cell = worksheet[XLSX.utils.encode_cell({ r, c })];
+            
+            if (!cell || !cell.v) {
+              let searchR = r - 1;
+              while (searchR > headerRowIndex) {
+                const aboveCell = worksheet[XLSX.utils.encode_cell({ r: searchR, c })];
+                if (aboveCell?.v) {
+                  cell = aboveCell;
+                  break;
+                }
+                searchR--;
+              }
+            }
+
             const value = (cell?.v || '').toString().trim();
             if (value) hasData = true;
             row.push({ [headers[c] || `column_${c}`]: value });
           }
-          
+
           if (hasData && row.some((col) => Object.values(col).some(v => v))) {
-            dataRows.push(row);
+            const isEmptyRow = row.every(col => {
+              const val = Object.values(col)[0];
+              return !val;
+            });
+
+            const isNoteRow = row.length > 0 && Object.values(row[0])[0]?.includes('说明');
+
+            if (!isEmptyRow && !isNoteRow) {
+              dataRows.push(row);
+            }
           }
         }
-        
+
         if (dataRows.length === 0) {
-          reject(new Error('Excel文件中没有有效数据'));
+          reject(new Error('Excel文件中没有有效数据（表头下方没有数据行）'));
           return;
         }
-        
+
         resolve({ headers, data: dataRows });
       } catch (error) {
+        console.error('Parse Excel error:', error);
         reject(error instanceof Error ? error : new Error('Excel文件解析失败'));
       }
     };
@@ -230,36 +305,36 @@ export function findMatchingTemplate(headers: string[]): TemplateRule | null {
 
 export function validateOrderItem(item: OrderItem): FieldError[] {
   const errors: FieldError[] = [];
-  
-  if (!item.senderName.trim()) {
+
+  if (!item.senderName || !item.senderName.trim()) {
     errors.push({ field: 'senderName', message: '发件人姓名不能为空' });
   }
   
-  if (!item.senderPhone.trim()) {
+  if (!item.senderPhone || !item.senderPhone.trim()) {
     errors.push({ field: 'senderPhone', message: '发件人电话不能为空' });
   } else if (!/^1[3-9]\d{9}$/.test(item.senderPhone.replace(/\s/g, ''))) {
     errors.push({ field: 'senderPhone', message: '发件人电话格式错误（需为11位手机号）' });
   }
   
-  if (!item.senderAddress.trim()) {
+  if (!item.senderAddress || !item.senderAddress.trim()) {
     errors.push({ field: 'senderAddress', message: '发件人地址不能为空' });
   }
-  
-  if (!item.receiverName.trim()) {
+
+  if (!item.receiverName || !item.receiverName.trim()) {
     errors.push({ field: 'receiverName', message: '收件人姓名不能为空' });
   }
-  
-  if (!item.receiverPhone.trim()) {
+
+  if (!item.receiverPhone || !item.receiverPhone.trim()) {
     errors.push({ field: 'receiverPhone', message: '收件人电话不能为空' });
   } else if (!/^1[3-9]\d{9}$/.test(item.receiverPhone.replace(/\s/g, ''))) {
     errors.push({ field: 'receiverPhone', message: '收件人电话格式错误（需为11位手机号）' });
   }
   
-  if (!item.receiverAddress.trim()) {
+  if (!item.receiverAddress || !item.receiverAddress.trim()) {
     errors.push({ field: 'receiverAddress', message: '收件人地址不能为空' });
   }
-  
-  if (!item.weight.trim()) {
+
+  if (!item.weight || !item.weight.trim()) {
     errors.push({ field: 'weight', message: '重量不能为空' });
   } else {
     const weight = parseFloat(item.weight);
@@ -268,7 +343,7 @@ export function validateOrderItem(item: OrderItem): FieldError[] {
     }
   }
   
-  if (!item.quantity.trim()) {
+  if (!item.quantity || !item.quantity.trim()) {
     errors.push({ field: 'quantity', message: '件数不能为空' });
   } else {
     const quantity = parseInt(item.quantity, 10);
@@ -277,7 +352,7 @@ export function validateOrderItem(item: OrderItem): FieldError[] {
     }
   }
   
-  if (!item.temperature.trim()) {
+  if (!item.temperature || !item.temperature.trim()) {
     errors.push({ field: 'temperature', message: '温层不能为空' });
   } else if (!TEMPERATURE_OPTIONS.includes(item.temperature.trim())) {
     errors.push({ field: 'temperature', message: `温层必须是：${TEMPERATURE_OPTIONS.join('、')}之一` });
@@ -324,9 +399,9 @@ export function convertToOrderItems(
 
 export function findDuplicateExternalCodes(items: OrderItem[]): Map<string, number[]> {
   const codeMap = new Map<string, number[]>();
-  
+
   items.forEach((item, index) => {
-    if (item.externalCode.trim()) {
+    if (item.externalCode && item.externalCode.trim()) {
       const code = item.externalCode.trim();
       if (!codeMap.has(code)) {
         codeMap.set(code, []);
@@ -334,36 +409,158 @@ export function findDuplicateExternalCodes(items: OrderItem[]): Map<string, numb
       codeMap.get(code)!.push(index);
     }
   });
-  
+
   return new Map([...codeMap].filter(([, indices]) => indices.length > 1));
+}
+
+export function findAllDuplicates(items: OrderItem[]): { field: OrderItemField; duplicates: Map<string, number[]> }[] {
+  const results: { field: OrderItemField; duplicates: Map<string, number[]> }[] = [];
+
+  // 外部编码去重
+  const externalCodeDuplicates = findDuplicateExternalCodes(items);
+  if (externalCodeDuplicates.size > 0) {
+    results.push({ field: 'externalCode', duplicates: externalCodeDuplicates });
+  }
+
+  // 收件人电话去重
+  const receiverPhoneMap = new Map<string, number[]>();
+  items.forEach((item, index) => {
+    if (item.receiverPhone && item.receiverPhone.trim()) {
+      const phone = item.receiverPhone.trim().replace(/\s/g, '');
+      if (!receiverPhoneMap.has(phone)) {
+        receiverPhoneMap.set(phone, []);
+      }
+      receiverPhoneMap.get(phone)!.push(index);
+    }
+  });
+  const receiverPhoneDuplicates = new Map([...receiverPhoneMap].filter(([, indices]) => indices.length > 1));
+  if (receiverPhoneDuplicates.size > 0) {
+    results.push({ field: 'receiverPhone', duplicates: receiverPhoneDuplicates });
+  }
+
+  // 发件人电话去重
+  const senderPhoneMap = new Map<string, number[]>();
+  items.forEach((item, index) => {
+    if (item.senderPhone && item.senderPhone.trim()) {
+      const phone = item.senderPhone.trim().replace(/\s/g, '');
+      if (!senderPhoneMap.has(phone)) {
+        senderPhoneMap.set(phone, []);
+      }
+      senderPhoneMap.get(phone)!.push(index);
+    }
+  });
+  const senderPhoneDuplicates = new Map([...senderPhoneMap].filter(([, indices]) => indices.length > 1));
+  if (senderPhoneDuplicates.size > 0) {
+    results.push({ field: 'senderPhone', duplicates: senderPhoneDuplicates });
+  }
+
+  return results;
+}
+
+export function applyDuplicateValidation(items: OrderItem[], dbDuplicates?: Set<string>): OrderItem[] {
+  const allDuplicates = findAllDuplicates(items);
+
+  return items.map((item, index) => {
+    const newErrors = [...item.errors];
+
+    allDuplicates.forEach(({ field, duplicates }) => {
+      let value = '';
+      if (field === 'externalCode') value = (item.externalCode || '').trim();
+      else if (field === 'receiverPhone') value = (item.receiverPhone || '').trim().replace(/\s/g, '');
+      else if (field === 'senderPhone') value = (item.senderPhone || '').trim().replace(/\s/g, '');
+
+      if (value && duplicates.has(value)) {
+        const indices = duplicates.get(value)!;
+        if (indices.indexOf(index) > 0) {
+          const firstRow = indices[0] + 1;
+          const fieldLabel = field === 'externalCode' ? '外部编码' : field === 'receiverPhone' ? '收件人电话' : '发件人电话';
+          newErrors.push({
+            field,
+            message: `${fieldLabel}重复（与第${firstRow}行重复）`
+          });
+        }
+      }
+    });
+
+    if (dbDuplicates && item.externalCode && item.externalCode.trim() && dbDuplicates.has(item.externalCode.trim())) {
+      newErrors.push({
+        field: 'externalCode',
+        message: '外部编码已存在于数据库中'
+      });
+    }
+
+    return { ...item, errors: newErrors };
+  });
 }
 
 export async function checkDuplicatesInDatabase(externalCodes: string[]): Promise<Set<string>> {
   const existingCodes = new Set<string>();
-  
+
   if (externalCodes.length === 0) {
     return existingCodes;
   }
-  
+
   if (!supabase) {
     return existingCodes;
   }
-  
+
   try {
-    const { data } = await supabase.from('orders').select('external_code');
-    if (data) {
-      const dbCodes = new Set(data.map((d: any) => d.external_code?.trim()).filter(Boolean));
-      externalCodes.forEach(code => {
-        if (dbCodes.has(code.trim())) {
-          existingCodes.add(code.trim());
+    const validCodes = externalCodes.filter(code => code && code.trim()).map(code => code.trim());
+
+    if (validCodes.length === 0) {
+      return existingCodes;
+    }
+
+    const { data, error } = await supabase
+      .from('orders')
+      .select('external_code')
+      .in('external_code', validCodes);
+
+    if (error) {
+      console.warn('检查数据库重复时出错:', error.message);
+      return existingCodes;
+    }
+
+    if (data && data.length > 0) {
+      data.forEach((d: any) => {
+        if (d.external_code?.trim()) {
+          existingCodes.add(d.external_code.trim());
         }
       });
     }
-  } catch {
-    console.warn('无法检查数据库重复');
+  } catch (error) {
+    console.warn('无法检查数据库重复:', error);
   }
-  
+
   return existingCodes;
+}
+
+export async function checkSingleExternalCodeExists(externalCode: string): Promise<boolean> {
+  if (!externalCode || !externalCode.trim()) {
+    return false;
+  }
+
+  if (!supabase) {
+    return false;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('external_code', externalCode.trim())
+      .limit(1);
+
+    if (error) {
+      console.warn('检查外部编码存在性时出错:', error.message);
+      return false;
+    }
+
+    return data && data.length > 0;
+  } catch (error) {
+    console.warn('无法检查外部编码:', error);
+    return false;
+  }
 }
 
 export function exportToExcel(items: OrderItem[]): Blob {

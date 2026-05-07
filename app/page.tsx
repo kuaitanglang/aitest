@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Upload, Button, Table, Input, Select, message, Modal, Progress, Card, Tag, Space, Tabs, Alert } from 'antd';
+import { Upload, Button, Table, Input, Select, message, Modal, Progress, Card, Tag, Space, Tabs, Alert, Tooltip } from 'antd';
 import { UploadOutlined, PlusOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, SendOutlined, RestOutlined, CheckOutlined, WarningOutlined } from '@ant-design/icons';
-import { parseExcelFile, autoDetectMappings, findMatchingTemplate, saveTemplateRule, convertToOrderItems, validateOrderItem, exportToExcel, findDuplicateExternalCodes, checkDuplicatesInDatabase } from '@/lib/excel';
+import { parseExcelFile, autoDetectMappings, findMatchingTemplate, saveTemplateRule, convertToOrderItems, validateOrderItem, exportToExcel, findDuplicateExternalCodes, checkDuplicatesInDatabase, applyDuplicateValidation, checkSingleExternalCodeExists } from '@/lib/excel';
 import { supabase } from '@/lib/supabase';
 import { OrderItem, ColumnMapping, SYSTEM_FIELDS, REQUIRED_FIELDS, TEMPERATURE_OPTIONS, OrderItemField } from '@/types';
 import type { UploadProps } from 'antd';
@@ -18,7 +18,6 @@ export default function Home() {
   const [showPreview, setShowPreview] = useState(false);
   const [importProgress, setImportProgress] = useState({ progress: 0, current: 0, total: 0 });
   const [isImporting, setIsImporting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<{ success: number; failed: number } | null>(null);
   const editingCellRef = useRef<any>(null);
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -31,7 +30,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetchOrders();
+    if (activeTab === 'history') {
+      fetchOrders();
+    }
+  }, [activeTab, currentPage, searchTerm, searchField, startDate, endDate]);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.key === 'Tab' || e.key === 'Enter') && activeTab === 'upload') {
         e.preventDefault();
@@ -86,7 +90,6 @@ export default function Home() {
   const handleFileSelect = useCallback(async (file: File) => {
     setIsImporting(true);
     setImportProgress({ progress: 0, current: 0, total: 100 });
-    setSubmitResult(null);
 
     try {
       setImportProgress({ progress: 20, current: 1, total: 5 });
@@ -137,24 +140,12 @@ export default function Home() {
       const orderItems = convertToOrderItems(data, detectedMappings);
       
       setImportProgress({ progress: 80, current: 4, total: 5 });
-      const duplicates = findDuplicateExternalCodes(orderItems);
       const externalCodes = orderItems.map(item => item.externalCode.trim()).filter(Boolean);
       const dbDuplicates = await checkDuplicatesInDatabase(externalCodes);
-      
-      orderItems.forEach((item, index) => {
-        const code = item.externalCode.trim();
-        if (code && duplicates.has(code)) {
-          const indices = duplicates.get(code)!;
-          if (indices.indexOf(index) > 0) {
-            item.errors.push({ field: 'externalCode', message: `外部编码重复（与第${indices[0] + 1}行重复）` });
-          }
-        }
-        if (code && dbDuplicates.has(code)) {
-          item.errors.push({ field: 'externalCode', message: `外部编码已存在于数据库中` });
-        }
-      });
 
-      setItems(orderItems);
+      const validatedItems = applyDuplicateValidation(orderItems, dbDuplicates);
+
+      setItems(validatedItems);
       setImportProgress({ progress: 100, current: 5, total: 5 });
     } catch (error) {
       message.error(`文件解析失败: ${error instanceof Error ? error.message : '未知错误'}`);
@@ -204,10 +195,10 @@ export default function Home() {
     const invalidCount = items.length - validItems.length;
 
     if (invalidCount > 0) {
-      const errorDetails = items.filter(i => i.errors.length > 0).map((item, idx) => 
+      const errorDetails = items.filter(i => i.errors.length > 0).map((item, idx) =>
         `第${idx + 1}行: ${item.errors.map(e => `${SYSTEM_FIELDS.find(f => f.key === e.field)?.label}${e.message}`).join('; ')}`
       ).join('\n');
-      
+
       Modal.error({
         title: `有 ${invalidCount} 条数据存在错误`,
         content: (
@@ -224,6 +215,60 @@ export default function Home() {
     setImportProgress({ progress: 10, current: 0, total: validItems.length });
 
     try {
+      const externalCodes = validItems.map(item => item.externalCode).filter(code => code && code.trim());
+
+      if (externalCodes.length > 0) {
+        setImportProgress({ progress: 20, current: 1, total: validItems.length });
+        const dbDuplicates = await checkDuplicatesInDatabase(externalCodes);
+
+        if (dbDuplicates.size > 0) {
+          const duplicateItems = validItems.filter(item =>
+            item.externalCode && dbDuplicates.has(item.externalCode.trim())
+          );
+
+          if (duplicateItems.length > 0) {
+            const duplicateDetails = duplicateItems.map(item =>
+              `外部编码 "${item.externalCode}" 已存在于数据库中`
+            ).join('\n');
+
+            Modal.error({
+              title: `有 ${duplicateItems.length} 条数据的外部编码已存在于数据库`,
+              content: (
+                <div style={{ maxHeight: '300px', overflowY: 'auto', fontSize: '13px' }}>
+                  <p className="mb-2">以下外部编码重复，请修改后重新提交：</p>
+                  <pre>{duplicateDetails}</pre>
+                </div>
+              ),
+              width: 600,
+            });
+
+            const updatedItems = items.map(item => {
+              if (item.externalCode && dbDuplicates.has(item.externalCode.trim())) {
+                const hasDbError = item.errors.some(e =>
+                  e.field === 'externalCode' && e.message.includes('数据库')
+                );
+                if (!hasDbError) {
+                  return {
+                    ...item,
+                    errors: [
+                      ...item.errors,
+                      { field: 'externalCode', message: '外部编码已存在于数据库中' },
+                    ],
+                  };
+                }
+              }
+              return item;
+            });
+
+            setItems(updatedItems);
+            setIsImporting(false);
+            return;
+          }
+        }
+      }
+
+      setImportProgress({ progress: 40, current: 2, total: validItems.length });
+
       const response = await fetch('/api/orders/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -239,12 +284,18 @@ export default function Home() {
       }
 
       const { success, failed } = result.data;
-      
+
       setImportProgress({ progress: 100, current: validItems.length, total: validItems.length });
       setIsImporting(false);
       setShowPreview(false);
       setItems([]);
-      setSubmitResult({ success, failed });
+
+      if (failed === 0) {
+        message.success(`✅ 成功提交 ${success} 条订单`);
+      } else {
+        message.warning(`⚠️ 提交完成：${success} 条成功，${failed} 条失败`);
+      }
+
       fetchOrders();
     } catch (error) {
       console.error('Submit error:', error);
@@ -253,10 +304,47 @@ export default function Home() {
     }
   }, [items, fetchOrders]);
 
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleCellChange = (rowIndex: number, field: OrderItemField, value: string) => {
     const newItems = [...items];
-    newItems[rowIndex] = { ...newItems[rowIndex], [field]: value, errors: validateOrderItem({ ...newItems[rowIndex], [field]: value }) };
-    setItems(newItems);
+    const updatedItem = { ...newItems[rowIndex], [field]: value, errors: validateOrderItem({ ...newItems[rowIndex], [field]: value }) };
+    newItems[rowIndex] = updatedItem;
+
+    let validatedItems = applyDuplicateValidation(newItems);
+
+    if (field === 'externalCode' && value && value.trim()) {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+
+      debounceTimerRef.current = setTimeout(async () => {
+        const exists = await checkSingleExternalCodeExists(value);
+        if (exists) {
+          validatedItems = validatedItems.map((item, idx) =>
+            idx === rowIndex
+              ? {
+                  ...item,
+                  errors: [
+                    ...item.errors.filter(e => e.field !== 'externalCode' || !e.message.includes('数据库')),
+                    { field: 'externalCode', message: '外部编码已存在于数据库中' },
+                  ],
+                }
+              : item
+          );
+          setItems(validatedItems);
+        } else {
+          const filteredErrors = validatedItems.map((item, idx) =>
+            idx === rowIndex
+              ? { ...item, errors: item.errors.filter(e => !(e.field === 'externalCode' && e.message.includes('数据库'))) }
+              : item
+          );
+          setItems(filteredErrors);
+        }
+      }, 500);
+    }
+
+    setItems(validatedItems);
   };
 
   const handleAddRow = () => {
@@ -305,28 +393,31 @@ export default function Home() {
         
         if (col.key === 'temperature') {
           return (
-            <Select 
-              size="small" 
-              value={text} 
-              onChange={(value) => handleCellChange(rowIndex, col.key as OrderItemField, value)} 
-              style={{ width: '100%', ...errorStyle }} 
-              status={error ? 'error' : undefined}
-              options={[{ value: '', label: '请选择' }, ...TEMPERATURE_OPTIONS.map((opt) => ({ value: opt, label: opt }))]} 
-            />
+            <Tooltip title={error?.message} placement="topLeft" overlayStyle={{ maxWidth: 300 }}>
+              <Select
+                size="small"
+                value={text}
+                onChange={(value) => handleCellChange(rowIndex, col.key as OrderItemField, value)}
+                style={{ width: '100%', ...errorStyle }}
+                status={error ? 'error' : undefined}
+                options={[{ value: '', label: '请选择' }, ...TEMPERATURE_OPTIONS.map((opt) => ({ value: opt, label: opt }))]}
+              />
+            </Tooltip>
           );
         }
-        
+
         return (
-          <Input
-            ref={editingCellRef}
-            size="small"
-            value={text}
-            onChange={(e) => handleCellChange(rowIndex, col.key as OrderItemField, e.target.value)}
-            onPressEnter={() => {}}
-            status={error ? 'error' : undefined}
-            style={errorStyle}
-            title={error?.message || ''}
-          />
+          <Tooltip title={error?.message} placement="topLeft" overlayStyle={{ maxWidth: 300 }}>
+            <Input
+              ref={editingCellRef}
+              size="small"
+              value={text}
+              onChange={(e) => handleCellChange(rowIndex, col.key as OrderItemField, e.target.value)}
+              onPressEnter={() => {}}
+              status={error ? 'error' : undefined}
+              style={errorStyle}
+            />
+          </Tooltip>
         );
       },
     })),
@@ -338,18 +429,10 @@ export default function Home() {
     { title: '创建时间', key: 'createdAt', width: 160, render: (_: unknown, record: OrderItem) => record.createdAt ? new Date(record.createdAt).toLocaleString('zh-CN') : '-' },
   ];
 
-  const filteredOrders = orders.filter((order) => {
-    if (searchField === 'createdAt') return !searchTerm || new Date(order.createdAt || '').toLocaleDateString('zh-CN').includes(searchTerm);
-    return (order[searchField as OrderItemField] as string)?.toLowerCase()?.includes(searchTerm.toLowerCase());
-  });
-
   return (
     <div className="min-h-screen bg-gray-50">
       <Card className="mt-4 mx-0" bodyStyle={{ padding: '16px 24px' }}>
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold m-0">万能导入系统</h1>
-          {activeTab === 'history' && <Tag color="blue">{totalOrders}</Tag>}
-        </div>
+        <h1 className="text-lg font-semibold m-0">订单导入系统</h1>
       </Card>
 
       <div className="px-4 mt-4 mb-8">
@@ -366,7 +449,7 @@ export default function Home() {
                 {isImporting && <Progress percent={importProgress.progress} status="active" className="mt-4" />}
               </Card>
 
-              {items.length > 0 && !submitResult && (
+              {items.length > 0 && (
                 <Card className="w-full" title={
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span>导入结果（{items.length} 条）{errorCount > 0 && <Tag color="error" className="ml-2">{errorCount} 个错误</Tag>}</span>
@@ -448,48 +531,27 @@ export default function Home() {
                   {isImporting && <Progress percent={importProgress.progress} status="active" className="mt-4" />}
                 </Card>
               )}
-
-              {submitResult && (
-                <Alert
-                  type={submitResult.failed === 0 ? "success" : "warning"}
-                  message={submitResult.failed === 0 ? "提交成功" : "部分提交成功"}
-                  description={
-                    <div className="mt-3 grid grid-cols-3 gap-4">
-                      <div className="text-center p-3 bg-gray-50 rounded"><div className="text-lg font-bold">{(submitResult.success || 0) + (submitResult.failed || 0)}</div><div className="text-xs text-gray-500 mt-1">总计</div></div>
-                      <div className="text-center p-3 bg-green-50 rounded"><div className="text-lg font-bold text-green-600">{submitResult.success || 0}</div><div className="text-xs text-green-600 mt-1">成功</div></div>
-                      <div className="text-center p-3 bg-red-50 rounded"><div className="text-lg font-bold text-red-600">{submitResult.failed || 0}</div><div className="text-xs text-red-600 mt-1">失败</div></div>
-                    </div>
-                  }
-                  showIcon
-                  action={
-                    <Space>
-                      <Button onClick={() => setSubmitResult(null)}>继续导入</Button>
-                      <Button type="primary" onClick={() => { setSubmitResult(null); setActiveTab('history'); }}>查看历史记录</Button>
-                    </Space>
-                  }
-                />
-              )}
             </Space>
           </Tabs.TabPane>
 
           <Tabs.TabPane tab={<span><RestOutlined /> 历史记录</span>} key="history">
             <Card className="w-full">
               <div className="flex flex-wrap items-center gap-3 mb-4">
-                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} placeholder="开始日期" style={{ width: 140 }} size="small" />
+                <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} placeholder="开始日期" style={{ width: 140 }} size="small" />
                 <span>-</span>
-                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} placeholder="结束日期" style={{ width: 140 }} size="small" />
-                <Select value={searchField} onChange={(value) => setSearchField(value as OrderItemField | 'createdAt')} style={{ width: 120 }} size="small" options={[
+                <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }} placeholder="结束日期" style={{ width: 140 }} size="small" />
+                <Select value={searchField} onChange={(value) => { setSearchField(value as OrderItemField | 'createdAt'); setCurrentPage(1); }} style={{ width: 120 }} size="small" options={[
                   { value: 'externalCode', label: '外部编码' },
                   { value: 'receiverName', label: '收件人' },
                   { value: 'senderName', label: '发件人' },
                   { value: 'createdAt', label: '创建时间' },
                 ]} />
-                <Input.Search placeholder="搜索" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ width: 200 }} size="small" allowClear />
-                <Button icon={<RestOutlined />} onClick={fetchOrders} loading={loading} size="small">刷新</Button>
+                <Input.Search placeholder="搜索" value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} onSearch={() => fetchOrders()} style={{ width: 200 }} size="small" allowClear />
+                <Button icon={<RestOutlined />} onClick={() => { setCurrentPage(1); fetchOrders(); }} loading={loading} size="small">刷新</Button>
               </div>
 
-              <Table columns={listColumns} dataSource={filteredOrders} loading={loading} pagination={{
-                current: currentPage, pageSize: 10, total: totalOrders, onChange: setCurrentPage, showTotal: (total) => `共 ${total} 条`
+              <Table columns={listColumns} dataSource={orders} loading={loading} pagination={{
+                current: currentPage, pageSize: 10, total: totalOrders, onChange: (page) => { setCurrentPage(page); }, showTotal: (total) => `共 ${total} 条`, showSizeChanger: false
               }} bordered scroll={{ x: 'max-content' }} rowKey="id" size="small" className="w-full" />
             </Card>
           </Tabs.TabPane>
