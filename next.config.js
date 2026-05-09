@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  distDir: process.env.VERCEL ? '.next-vercel' : '.next',
   webpack: (config, { dev }) => {
     if (dev) {
       config.watchOptions = {
