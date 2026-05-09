@@ -55,12 +55,13 @@ export const COLUMN_ALIASES: Record<Exclude<keyof OrderItem, 'createdAt'>, strin
     '运单号', '快递单号', '物流单号', '单号', 
     'ExternalCode', 'OrderNo', 'TrackingNumber',
     'Ref Code', 'ref_code', 'refcode', 'Reference Code',
-    '外部订单号', '参考编码', '参考号'
+    '外部订单号', '参考编码', '参考号',
+    '客户单号', '客户订单号', '内部订单号', '订单号'
   ],
   senderName: [
     '发件人姓名', '寄件人姓名', '发件人', '寄件人', 
     'sender', 'sender_name', 'from_name', 'shipper',
-    '发货人姓名', '寄方姓名', '寄件方',
+    '发货人姓名', '寄方姓名', '寄件方', '发货人',
     'SenderName', 'ShipperName', 'FromName',
     'Sender', '发货人', '寄件方', '发件方'
   ],
@@ -70,7 +71,8 @@ export const COLUMN_ALIASES: Record<Exclude<keyof OrderItem, 'createdAt'>, strin
     '发件人手机', '寄件人手机', '发货人电话',
     'SenderPhone', 'ShipperPhone', 'FromPhone',
     'Sender Tel', 'sender_tel', 'SenderTel',
-    '发货电话', '寄件电话'
+    '发货电话', '寄件电话', '发货人联系电话', '发件人联系电话',
+    '发件电话'
   ],
   senderAddress: [
     '发件人地址', '寄件人地址', '发货地址', 
@@ -78,7 +80,7 @@ export const COLUMN_ALIASES: Record<Exclude<keyof OrderItem, 'createdAt'>, strin
     '发件地址', '寄件地址', '发货人地址',
     'SenderAddress', 'ShipperAddress', 'FromAddress',
     'Sender Address', 'sender_address',
-    '发货地址', '寄件地址', '发件地址'
+    '发货地址', '寄件地址', '发件地址', '发货人详细地址'
   ],
   receiverName: [
     '收件人姓名', '收货人姓名', '收件人', '收货人', '收方', 
@@ -93,7 +95,7 @@ export const COLUMN_ALIASES: Record<Exclude<keyof OrderItem, 'createdAt'>, strin
     '收件人手机', '收货人手机', '收货方电话',
     'ReceiverPhone', 'ConsigneePhone', 'ToPhone',
     'Receiver Tel', 'receiver_tel', 'ReceiverTel',
-    '收货电话', '收件电话'
+    '收货电话', '收件电话', '收货人联系电话'
   ],
   receiverAddress: [
     '收件人地址', '收货人地址', '收货地址', 
@@ -101,32 +103,36 @@ export const COLUMN_ALIASES: Record<Exclude<keyof OrderItem, 'createdAt'>, strin
     '收货地址', '收方地址', '收件方地址',
     'ReceiverAddress', 'ConsigneeAddress', 'ToAddress',
     'Receiver Address', 'receiver_address',
-    '收货地址', '收件地址'
+    '收货地址', '收件地址', '收货人详细地址'
   ],
   weight: [
     '重量', '重量(kg)', '重量KG', '货物重量', 
     'weight', 'kg', 'weight_kg', 'Weight',
     '净重', '毛重', '实际重量',
-    'Weight(kg)', 'Weight_KG'
+    'Weight(kg)', 'Weight_KG',
+    '重量(KG)', '重量（KG）', '重量(公斤)', '重量kg'
   ],
   quantity: [
     '件数', '数量', '包裹数量', '总件数', 
     'quantity', 'count', 'pieces', 'Quantity',
     '箱数', '盒数', '包装数量',
-    'Qty', 'qty', 'QTY'
+    'Qty', 'qty', 'QTY',
+    '件数(箱)', '数量（件）', '总数'
   ],
   temperature: [
     '温层', '温度', '温度层', '冷藏要求', '温控', 
     'temperature', 'temp', 'cold', 'Temperature',
     '储存温度', '运输温度', '冷链类型',
     'Temp Zone', 'temp_zone', 'TempZone',
-    '温度要求', '温控要求', '储存条件'
+    '温度要求', '温控要求', '储存条件',
+    '温层要求', '温区', '温度区域'
   ],
   remark: [
     '备注', '说明', '备注信息', '附加说明', 
     'remark', 'note', 'comments', 'Remark',
     '注意事项', '特殊说明', '其他信息',
-    'Note', '附言', '留言', '补充信息'
+    'Note', '附言', '留言', '补充信息',
+    '给送货员留言', '给快递员留言', '订单备注'
   ],
   errors: [],
 };

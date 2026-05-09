@@ -3,7 +3,12 @@ import { OrderItem, SYSTEM_FIELDS, COLUMN_ALIASES, TemplateRule, REQUIRED_FIELDS
 import { supabase } from '@/lib/supabase';
 
 function isHeaderRow(row: string[]): boolean {
-  const headerKeywords = ['外部编码', '发件人', '收件人', '重量', '件数', '温层', '备注', 'external', 'sender', 'receiver', 'weight', 'quantity', 'temperature'];
+  const headerKeywords = [
+    '外部编码', '发件人', '收件人', '重量', '件数', '温层', '备注',
+    'external', 'sender', 'receiver', 'weight', 'quantity', 'temperature',
+    '客户单号', '发货人', '收货人', '数量', '温度要求', '附言',
+    'Ref Code', 'Qty'
+  ];
   const rowStr = row.join(' ').toLowerCase();
 
   const matchCount = headerKeywords.filter(keyword => rowStr.includes(keyword.toLowerCase())).length;
@@ -11,12 +16,25 @@ function isHeaderRow(row: string[]): boolean {
   return matchCount >= 2;
 }
 
+function isGroupHeaderRow(row: string[]): boolean {
+  const groupKeywords = ['信息', '货物', '发件方', '收件方', '寄件方'];
+  const filledCells = row.filter(c => c && c.trim()).length;
+  const totalCells = row.filter(c => c !== undefined).length;
+  const hasGroupLabel = row.some(c => groupKeywords.some(k => c?.includes(k)));
+
+  return hasGroupLabel && filledCells < totalCells * 0.4;
+}
+
 function findHeaderRow(worksheet: XLSX.WorkSheet, range: XLSX.Range): number {
-  for (let r = range.s.r; r <= Math.min(range.s.r + 10, range.e.r); r++) {
+  for (let r = range.s.r; r <= Math.min(range.s.r + 15, range.e.r); r++) {
     const rowValues: string[] = [];
     for (let c = range.s.c; c <= range.e.c; c++) {
       const cell = worksheet[XLSX.utils.encode_cell({ r, c })];
       rowValues.push((cell?.v || '').toString().trim());
+    }
+
+    if (isGroupHeaderRow(rowValues)) {
+      continue;
     }
 
     if (isHeaderRow(rowValues)) {
@@ -73,7 +91,15 @@ export function parseExcelFile(file: File): Promise<{ headers: string[]; data: R
           return;
         }
 
-        const sheetName = workbook.SheetNames[0];
+        let sheetName = workbook.SheetNames[0];
+        for (const name of workbook.SheetNames) {
+          const nameStr = (name || '').trim();
+          if (!nameStr.includes('说明') && !nameStr.includes('使用') && !nameStr.includes('help') && !nameStr.includes('Help')) {
+            sheetName = name;
+            break;
+          }
+        }
+
         const worksheet = workbook.Sheets[sheetName];
 
         if (!worksheet['!ref']) {
@@ -91,24 +117,26 @@ export function parseExcelFile(file: File): Promise<{ headers: string[]; data: R
         for (let c = range.s.c; c <= range.e.c; c++) {
           const cell = worksheet[XLSX.utils.encode_cell({ r: headerRowIndex, c })];
           let headerValue = (cell?.v || '').toString().trim();
-          
+
           if (!headerValue) {
             let searchR = headerRowIndex - 1;
-            while (searchR >= Math.max(0, headerRowIndex - 3)) {
+            while (searchR >= Math.max(0, headerRowIndex - 4)) {
               const aboveCell = worksheet[XLSX.utils.encode_cell({ r: searchR, c })];
               if (aboveCell?.v) {
                 headerValue = aboveCell.v.toString().trim();
-                break;
+                if (!isGroupHeaderRow([headerValue])) {
+                  break;
+                }
               }
               searchR--;
             }
           }
-          
+
           headers.push(headerValue || `列${c + 1}`);
         }
 
         const filteredHeaders = headers.filter(h => h && !h.match(/^列\d+$/));
-        
+
         if (filteredHeaders.length < 2) {
           reject(new Error('无法识别表头，请检查Excel格式（确保包含"发件人"、"收件人"、"重量"等字段）'));
           return;
@@ -121,7 +149,7 @@ export function parseExcelFile(file: File): Promise<{ headers: string[]; data: R
 
           for (let c = range.s.c; c <= range.e.c; c++) {
             let cell = worksheet[XLSX.utils.encode_cell({ r, c })];
-            
+
             if (!cell || !cell.v) {
               let searchR = r - 1;
               while (searchR > headerRowIndex) {
@@ -139,17 +167,12 @@ export function parseExcelFile(file: File): Promise<{ headers: string[]; data: R
             row.push({ [headers[c] || `column_${c}`]: value });
           }
 
-          if (hasData && row.some((col) => Object.values(col).some(v => v))) {
-            const isEmptyRow = row.every(col => {
-              const val = Object.values(col)[0];
-              return !val;
-            });
+          if (!hasData) continue;
 
-            const isNoteRow = row.length > 0 && Object.values(row[0])[0]?.includes('说明');
+          const isNoteRow = row.length > 0 && Object.values(row[0])[0]?.includes('说明');
 
-            if (!isEmptyRow && !isNoteRow) {
-              dataRows.push(row);
-            }
+          if (!isNoteRow) {
+            dataRows.push(row);
           }
         }
 
@@ -365,6 +388,15 @@ export function convertToOrderItems(
   data: Record<string, string>[][],
   mappings: { excelColumn: string; systemField: OrderItemField }[]
 ): OrderItem[] {
+  const mappingLookup = new Map<string, OrderItemField>();
+  for (const mapping of mappings) {
+    if (mapping.excelColumn) {
+      mappingLookup.set(mapping.excelColumn, mapping.systemField);
+    }
+  }
+
+  const defaultFields: OrderItemField[] = ['externalCode', 'senderName', 'senderPhone', 'senderAddress', 'receiverName', 'receiverPhone', 'receiverAddress', 'weight', 'quantity', 'temperature', 'remark'];
+
   return data.map((row, index) => {
     const item: OrderItem = {
       id: `row_${index + 1}`,
@@ -381,17 +413,17 @@ export function convertToOrderItems(
       remark: '',
       errors: [],
     };
-    
-    for (const mapping of mappings) {
-      for (const cell of row) {
-        const cellKey = Object.keys(cell)[0];
-        if (cellKey === mapping.excelColumn) {
-          item[mapping.systemField] = cell[cellKey];
-          break;
-        }
+
+    for (const cell of row) {
+      const cellKey = Object.keys(cell)[0];
+      if (!cellKey) continue;
+
+      const field = mappingLookup.get(cellKey);
+      if (field) {
+        item[field] = cell[cellKey] || '';
       }
     }
-    
+
     item.errors = validateOrderItem(item);
     return item;
   });

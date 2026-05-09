@@ -23,7 +23,6 @@ table {
   border-collapse: collapse;
 }
 
-/* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -43,23 +42,24 @@ table {
   background: #a1a1a1;
 }
 
-/* 动画 */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-out;
 }
 
-/* 错误行高亮 */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slideDown {
+  animation: slideDown 0.35s ease-out;
+}
+
 .error-row {
   background-color: #fff1f0 !important;
   transition: background-color 0.3s ease;
@@ -69,7 +69,6 @@ table {
   background-color: #ffe7e6 !important;
 }
 
-/* 错误输入框样式增强 */
 .ant-input-status-error,
 .ant-select-status-error .ant-select-selector {
   border-color: #ff4d4f !important;
@@ -82,4 +81,270 @@ table {
 .ant-select-status-error:hover .ant-select-selector {
   border-color: #ff4d4f !important;
   box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.2) !important;
+}
+
+.header-gradient {
+  background: linear-gradient(135deg, #1677ff 0%, #0958d9 50%, #003eb3 100%);
+}
+
+.upload-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.upload-card .ant-upload-drag {
+  border: 2px dashed #d9d9d9;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  padding: 32px 0;
+}
+
+.upload-card .ant-upload-drag:hover {
+  border-color: #1677ff;
+  background: linear-gradient(135deg, #f6f9ff 0%, #ffffff 100%);
+}
+
+.upload-card .ant-upload-drag-icon {
+  margin-bottom: 16px;
+}
+
+.upload-card .ant-upload-drag-icon .anticon {
+  font-size: 48px;
+  color: #1677ff;
+  transition: transform 0.3s ease;
+}
+
+.upload-card .ant-upload-drag:hover .ant-upload-drag-icon .anticon {
+  transform: scale(1.1);
+}
+
+.upload-card .ant-upload-text {
+  font-size: 16px;
+  color: #1a1a1a;
+  margin-bottom: 8px;
+}
+
+.upload-card .ant-upload-hint {
+  font-size: 13px;
+  color: #8c8c8c;
+}
+
+.import-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.import-card .ant-card-head {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #fafbff 0%, #ffffff 100%);
+}
+
+.import-card .ant-card-body {
+  padding: 20px;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 16px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #f6f9ff 0%, #ffffff 100%);
+  border: 1px solid #e8f0fe;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-right: 1px solid #e8e8e8;
+}
+
+.stat-item:last-child {
+  border-right: none;
+}
+
+.stat-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.stat-icon-blue { background: #e6f4ff; color: #1677ff; }
+.stat-icon-red { background: #fff1f0; color: #ff4d4f; }
+.stat-icon-green { background: #f6ffed; color: #52c41a; }
+.stat-icon-orange { background: #fff7e6; color: #fa8c16; }
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.table-enhanced .ant-table-thead > tr > th {
+  background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
+  font-weight: 600;
+  color: #262626;
+  padding: 10px 12px;
+}
+
+.table-enhanced .ant-table-tbody > tr:hover > td {
+  background-color: #f6f9ff !important;
+}
+
+.table-enhanced .ant-table-tbody > tr.error-row:hover > td {
+  background-color: #ffe7e6 !important;
+}
+
+.mapping-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.mapping-tag:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.alert-enhanced {
+  border-radius: 8px;
+  border-left-width: 4px;
+}
+
+.history-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.history-card .ant-card-body {
+  padding: 20px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.submit-btn {
+  height: 44px;
+  padding: 0 32px;
+  font-size: 15px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+  border: none;
+  box-shadow: 0 2px 6px rgba(22, 119, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.4);
+}
+
+.submit-btn:disabled {
+  background: #d9d9d9;
+  box-shadow: none;
+}
+
+.history-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.history-toolbar .ant-input-search {
+  min-width: 200px;
+}
+
+.history-toolbar .ant-select {
+  min-width: 100px;
+}
+
+/* Modal styling */
+.config-modal .ant-modal-header {
+  background: linear-gradient(135deg, #fafbff 0%, #ffffff 100%);
+  border-radius: 12px 12px 0 0;
+  padding: 20px 24px;
+}
+
+.config-modal .ant-modal-body {
+  padding: 20px 24px;
+}
+
+.config-modal .ant-modal-footer {
+  padding: 12px 24px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* Progress bar styling */
+.import-progress {
+  margin-top: 12px;
+}
+
+.import-progress .ant-progress-text {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Tab styling */
+.enhanced-tabs.ant-tabs-card > .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.enhanced-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  border-radius: 8px 8px 0 0;
+  padding: 8px 20px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.enhanced-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+  background: #ffffff;
+  border-bottom-color: #ffffff;
+  font-weight: 600;
+}
+
+/* Pagination styling */
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: #8c8c8c;
 }

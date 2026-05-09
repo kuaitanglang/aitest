@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { Upload, Button, Table, Input, Select, message, Modal, Progress, Card, Tag, Space, Tabs, Alert, Tooltip } from 'antd';
-import { UploadOutlined, PlusOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, SendOutlined, RestOutlined, CheckOutlined, WarningOutlined } from '@ant-design/icons';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { Upload, Button, Table, Input, Select, message, Modal, Progress, Card, Tag, Space, Tabs, Alert, Tooltip, Pagination } from 'antd';
+import { UploadOutlined, PlusOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, SendOutlined, RestOutlined, CheckOutlined, WarningOutlined, FileTextOutlined } from '@ant-design/icons';
 import { parseExcelFile, autoDetectMappings, findMatchingTemplate, saveTemplateRule, convertToOrderItems, validateOrderItem, exportToExcel, findDuplicateExternalCodes, checkDuplicatesInDatabase, applyDuplicateValidation, checkSingleExternalCodeExists } from '@/lib/excel';
 import { supabase } from '@/lib/supabase';
 import { OrderItem, ColumnMapping, SYSTEM_FIELDS, REQUIRED_FIELDS, TEMPERATURE_OPTIONS, OrderItemField } from '@/types';
@@ -20,8 +20,18 @@ export default function Home() {
   const [isImporting, setIsImporting] = useState(false);
   const editingCellRef = useRef<any>(null);
 
+  const [previewPage, setPreviewPage] = useState(1);
+  const PREVIEW_PAGE_SIZE = 50;
+  const itemsRef = useRef<OrderItem[]>([]);
+  itemsRef.current = items;
+
+  useEffect(() => {
+    setPreviewPage(1);
+  }, [items]);
+
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(10);
   const [totalOrders, setTotalOrders] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchField, setSearchField] = useState<OrderItemField | 'createdAt'>('externalCode');
@@ -33,7 +43,7 @@ export default function Home() {
     if (activeTab === 'history') {
       fetchOrders();
     }
-  }, [activeTab, currentPage, searchTerm, searchField, startDate, endDate]);
+  }, [activeTab, currentPage, historyPageSize, searchTerm, searchField, startDate, endDate]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -63,7 +73,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({
         page: currentPage.toString(),
-        pageSize: '10',
+        pageSize: historyPageSize.toString(),
         ...(searchTerm && { search: searchTerm, searchField }),
         ...(startDate && { startDate }),
         ...(endDate && { endDate }),
@@ -85,7 +95,7 @@ export default function Home() {
     }
     
     setLoading(false);
-  }, [currentPage, searchTerm, searchField, startDate, endDate]);
+  }, [currentPage, historyPageSize, searchTerm, searchField, startDate, endDate]);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsImporting(true);
@@ -311,40 +321,45 @@ export default function Home() {
     const updatedItem = { ...newItems[rowIndex], [field]: value, errors: validateOrderItem({ ...newItems[rowIndex], [field]: value }) };
     newItems[rowIndex] = updatedItem;
 
-    let validatedItems = applyDuplicateValidation(newItems);
-
-    if (field === 'externalCode' && value && value.trim()) {
+    if (field === 'externalCode') {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
 
       debounceTimerRef.current = setTimeout(async () => {
-        const exists = await checkSingleExternalCodeExists(value);
-        if (exists) {
-          validatedItems = validatedItems.map((item, idx) =>
-            idx === rowIndex
-              ? {
-                  ...item,
-                  errors: [
-                    ...item.errors.filter(e => e.field !== 'externalCode' || !e.message.includes('数据库')),
-                    { field: 'externalCode' as OrderItemField, message: '外部编码已存在于数据库中' },
-                  ],
-                }
-              : item
-          );
-          setItems(validatedItems);
+        const currentItems = itemsRef.current;
+        let validated = applyDuplicateValidation(currentItems);
+
+        if (value && value.trim()) {
+          const exists = await checkSingleExternalCodeExists(value);
+          if (exists) {
+            validated = validated.map((item, idx) =>
+              idx === rowIndex
+                ? {
+                    ...item,
+                    errors: [
+                      ...item.errors.filter(e => e.field !== 'externalCode' || !e.message.includes('数据库')),
+                      { field: 'externalCode' as OrderItemField, message: '外部编码已存在于数据库中' },
+                    ],
+                  }
+                : item
+            );
+            setItems(validated);
+          } else {
+            const filtered = validated.map((item, idx) =>
+              idx === rowIndex
+                ? { ...item, errors: item.errors.filter(e => !(e.field === 'externalCode' && e.message.includes('数据库'))) }
+                : item
+            );
+            setItems(filtered);
+          }
         } else {
-          const filteredErrors = validatedItems.map((item, idx) =>
-            idx === rowIndex
-              ? { ...item, errors: item.errors.filter(e => !(e.field === 'externalCode' && e.message.includes('数据库'))) }
-              : item
-          );
-          setItems(filteredErrors);
+          setItems(validated);
         }
       }, 500);
     }
 
-    setItems(validatedItems);
+    setItems(newItems);
   };
 
   const handleAddRow = () => {
@@ -362,9 +377,21 @@ export default function Home() {
     disabled: isImporting,
   };
 
-  const hasErrors = items.some((item) => item.errors.length > 0);
-  const allErrors = items.flatMap((item, index) => item.errors.map((error) => ({ row: index + 1, field: SYSTEM_FIELDS.find((f) => f.key === error.field)?.label, message: error.message })));
-  const errorCount = allErrors.length;
+  const { hasErrors, allErrors, errorCount } = useMemo(() => {
+    const all = items.flatMap((item, index) => item.errors.map((error) => ({ row: index + 1, field: SYSTEM_FIELDS.find((f) => f.key === error.field)?.label, message: error.message })));
+    return {
+      hasErrors: items.some((item) => item.errors.length > 0),
+      allErrors: all,
+      errorCount: all.length,
+    };
+  }, [items]);
+
+  const pagedItems = useMemo(() => {
+    const start = (previewPage - 1) * PREVIEW_PAGE_SIZE;
+    return items.slice(start, start + PREVIEW_PAGE_SIZE);
+  }, [items, previewPage]);
+
+  const totalPages = useMemo(() => Math.ceil(items.length / PREVIEW_PAGE_SIZE), [items.length]);
 
   const columns = SYSTEM_FIELDS.map((field) => ({
     title: (<span>{field.label}{REQUIRED_FIELDS.includes(field.key) && <span className="ml-1 text-red-500">*</span>}</span>),
@@ -378,11 +405,15 @@ export default function Home() {
   }));
 
   const previewColumns = [
-    { title: '#', key: 'index', width: 50, fixed: 'left' as const, render: (_: any, __: OrderItem, index: number) => index + 1 },
-    { title: '操作', key: 'action', width: 60, fixed: 'left' as const, render: (_: any, __: OrderItem, rowIndex: number) => <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={() => handleDeleteRow(rowIndex)} /> },
+    { title: '#', key: 'index', width: 50, fixed: 'left' as const, render: (_: any, __: OrderItem, index: number) => (previewPage - 1) * PREVIEW_PAGE_SIZE + index + 1 },
+    { title: '操作', key: 'action', width: 60, fixed: 'left' as const, render: (_: any, __: OrderItem, rowIndex: number) => {
+      const actualIndex = (previewPage - 1) * PREVIEW_PAGE_SIZE + rowIndex;
+      return <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={() => handleDeleteRow(actualIndex)} />;
+    } },
     ...columns.map((col) => ({
       ...col,
       render: (text: string, record: OrderItem, rowIndex: number) => {
+        const actualIndex = (previewPage - 1) * PREVIEW_PAGE_SIZE + rowIndex;
         const error = record.errors?.find((e) => e.field === col.key);
         
         const errorStyle = error ? {
@@ -397,7 +428,7 @@ export default function Home() {
               <Select
                 size="small"
                 value={text}
-                onChange={(value) => handleCellChange(rowIndex, col.key as OrderItemField, value)}
+                onChange={(value) => handleCellChange(actualIndex, col.key as OrderItemField, value)}
                 style={{ width: '100%', ...errorStyle }}
                 status={error ? 'error' : undefined}
                 options={[{ value: '', label: '请选择' }, ...TEMPERATURE_OPTIONS.map((opt) => ({ value: opt, label: opt }))]}
@@ -412,7 +443,7 @@ export default function Home() {
               ref={editingCellRef}
               size="small"
               value={text}
-              onChange={(e) => handleCellChange(rowIndex, col.key as OrderItemField, e.target.value)}
+              onChange={(e) => handleCellChange(actualIndex, col.key as OrderItemField, e.target.value)}
               onPressEnter={() => {}}
               status={error ? 'error' : undefined}
               style={errorStyle}
@@ -424,35 +455,38 @@ export default function Home() {
   ];
 
   const listColumns = [
-    { title: '#', key: 'index', width: 50, render: (_: any, __: OrderItem, index: number) => (currentPage - 1) * 10 + index + 1 },
+    { title: '#', key: 'index', width: 50, render: (_: any, __: OrderItem, index: number) => (currentPage - 1) * historyPageSize + index + 1 },
     ...columns.map(col => ({ ...col, render: (text: string) => text || '-' })),
     { title: '创建时间', key: 'createdAt', width: 160, render: (_: unknown, record: OrderItem) => record.createdAt ? new Date(record.createdAt).toLocaleString('zh-CN') : '-' },
   ];
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Card className="mt-4 mx-0" bodyStyle={{ padding: '16px 24px' }}>
-        <h1 className="text-lg font-semibold m-0">订单导入系统</h1>
-      </Card>
+      <div className="bg-white shadow-sm">
+        <div className="h-[3px] bg-gradient-to-r from-blue-500 to-blue-600" />
+        <div className="px-12 py-[18px] max-w-7xl mx-auto">
+          <h1 className="text-xl font-bold text-gray-800 m-0 tracking-wide">订单导入系统</h1>
+        </div>
+      </div>
 
-      <div className="px-4 mt-4 mb-8">
-        <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key)} type="card" size="large" centered>
+      <div className="px-12 mt-6 mb-10 max-w-7xl mx-auto">
+        <Tabs activeKey={activeTab} onChange={(key) => setActiveTab(key)} type="card" size="large" centered className="enhanced-tabs">
           <Tabs.TabPane tab={<span><UploadOutlined /> 导入</span>} key="upload">
             <Space direction="vertical" size="middle" className="w-full" style={{ display: 'flex', width: '100%' }}>
-              <Card className="w-full">
+              <Card className="upload-card w-full">
                 <Upload.Dragger {...fileProps} className="w-full">
                   <p className="ant-upload-drag-icon"><UploadOutlined /></p>
                   <p className="ant-upload-text">点击或拖拽上传 Excel 文件</p>
                   <p className="ant-upload-hint">支持 .xlsx / .xls 格式 · 可重复导入覆盖</p>
                 </Upload.Dragger>
 
-                {isImporting && <Progress percent={importProgress.progress} status="active" className="mt-4" />}
+                {isImporting && <Progress percent={importProgress.progress} status="active" className="import-progress" />}
               </Card>
 
               {items.length > 0 && (
-                <Card className="w-full" title={
+                <Card className="import-card w-full" title={
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span>导入结果（{items.length} 条）{errorCount > 0 && <Tag color="error" className="ml-2">{errorCount} 个错误</Tag>}</span>
+                    <span className="text-base font-semibold">导入结果 <span className="text-gray-400 text-sm font-normal">（{items.length} 条）</span></span>
                     <Space wrap>
                       <Button icon={<EditOutlined />} onClick={handleMappingConfig} size="small">列映射配置</Button>
                       <Button icon={<PlusOutlined />} onClick={handleAddRow} size="small">新增行</Button>
@@ -460,6 +494,32 @@ export default function Home() {
                     </Space>
                   </div>
                 }>
+                  <div className="stats-bar animate-slideDown">
+                    <div className="stat-item">
+                      <div className="stat-icon stat-icon-blue"><FileTextOutlined /></div>
+                      <div>
+                        <div className="stat-value">{items.length}</div>
+                        <div className="stat-label">总条数</div>
+                      </div>
+                    </div>
+                    <div className="stat-item">
+                      <div className="stat-icon stat-icon-green"><CheckOutlined /></div>
+                      <div>
+                        <div className="stat-value">{items.filter(i => i.errors.length === 0).length}</div>
+                        <div className="stat-label">有效数据</div>
+                      </div>
+                    </div>
+                    {errorCount > 0 && (
+                      <div className="stat-item">
+                        <div className="stat-icon stat-icon-red"><WarningOutlined /></div>
+                        <div>
+                          <div className="stat-value">{errorCount}</div>
+                          <div className="stat-label">错误数</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {hasErrors && (
                     <Alert
                       message={`检测到 ${errorCount} 个错误，请修正后再提交`}
@@ -474,14 +534,13 @@ export default function Home() {
                       type="error"
                       showIcon
                       closable
-                      className="mb-4"
+                      className="alert-enhanced mb-4"
                     />
                   )}
 
-                  {/* 字段映射概览 */}
                   {mappings.length > 0 && (
                     <Alert
-                      message={`字段映射结果：已识别 ${mappings.length} 个字段${headers.filter(h => h).length > mappings.length ? `（未识别: ${headers.filter(h => h).length - mappings.length} 个）` : ''}`}
+                      message="字段映射概览"
                       description={
                         <div className="mt-2 flex flex-wrap gap-2">
                           {mappings.map((mapping, index) => {
@@ -489,31 +548,52 @@ export default function Home() {
                             return (
                               <Tag 
                                 key={index} 
+                                className="mapping-tag"
                                 color={REQUIRED_FIELDS.includes(mapping.systemField as OrderItemField) ? 'blue' : 'default'}
                               >
                                 {mapping.excelColumn} → {fieldInfo?.label || mapping.systemField}
                               </Tag>
                             );
                           })}
+                          {headers.filter(h => h).length > mappings.length && (
+                            <Tag className="mapping-tag" color="warning">
+                              +{headers.filter(h => h).length - mappings.length} 个未识别
+                            </Tag>
+                          )}
                         </div>
                       }
                       type="info"
                       showIcon
                       closable
-                      className="mb-4"
+                      className="alert-enhanced mb-4"
                     />
                   )}
 
                   <Table
                     columns={previewColumns}
-                    dataSource={items}
+                    dataSource={pagedItems}
                     pagination={false}
                     bordered
-                    scroll={{ x: 'max-content', y: window.innerHeight - 420 }}
+                    scroll={{ x: 'max-content', y: 480 }}
                     rowKey="id"
                     size="small"
+                    className="table-enhanced"
                     rowClassName={(record) => record.errors && record.errors.length > 0 ? 'error-row' : ''}
                   />
+
+                  {items.length > PREVIEW_PAGE_SIZE && (
+                    <div className="pagination-bar">
+                      <span className="pagination-info">共 {items.length} 条，{totalPages} 页</span>
+                      <Pagination
+                        current={previewPage}
+                        pageSize={PREVIEW_PAGE_SIZE}
+                        total={items.length}
+                        onChange={(page) => setPreviewPage(page)}
+                        showSizeChanger={false}
+                        size="small"
+                      />
+                    </div>
+                  )}
 
                   <div className="mt-4 flex justify-end">
                     <Button
@@ -522,24 +602,25 @@ export default function Home() {
                       onClick={handleSubmit}
                       disabled={isImporting || hasErrors}
                       loading={isImporting}
-                      size="large"
+                      className="submit-btn"
                     >
                       提交下单（{items.filter(i => i.errors.length === 0).length}/{items.length}）
                     </Button>
                   </div>
 
-                  {isImporting && <Progress percent={importProgress.progress} status="active" className="mt-4" />}
+                  {isImporting && <Progress percent={importProgress.progress} status="active" className="import-progress mt-4" />}
                 </Card>
               )}
             </Space>
           </Tabs.TabPane>
 
           <Tabs.TabPane tab={<span><RestOutlined /> 历史记录</span>} key="history">
-            <Card className="w-full">
-              <div className="flex flex-wrap items-center gap-3 mb-4">
+            <Card className="history-card w-full">
+              <div className="history-toolbar">
                 <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} placeholder="开始日期" style={{ width: 140 }} size="small" />
-                <span>-</span>
+                <span className="text-gray-400">-</span>
                 <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }} placeholder="结束日期" style={{ width: 140 }} size="small" />
+                <div className="w-px h-6 bg-gray-200 mx-1" />
                 <Select value={searchField} onChange={(value) => { setSearchField(value as OrderItemField | 'createdAt'); setCurrentPage(1); }} style={{ width: 120 }} size="small" options={[
                   { value: 'externalCode', label: '外部编码' },
                   { value: 'receiverName', label: '收件人' },
@@ -547,12 +628,24 @@ export default function Home() {
                   { value: 'createdAt', label: '创建时间' },
                 ]} />
                 <Input.Search placeholder="搜索" value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} onSearch={() => fetchOrders()} style={{ width: 200 }} size="small" allowClear />
+                <div className="w-px h-6 bg-gray-200 mx-1" />
+                <Button icon={<DownloadOutlined />} onClick={() => {
+                   if (orders.length === 0) { message.warning('当前页没有数据'); return; }
+                   const blob = exportToExcel(orders);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `当前页数据_${new Date().toISOString().slice(0, 10)}.xlsx`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  message.success('导出当前页成功');
+                }} size="small">导出当前页</Button>
                 <Button icon={<RestOutlined />} onClick={() => { setCurrentPage(1); fetchOrders(); }} loading={loading} size="small">刷新</Button>
               </div>
 
               <Table columns={listColumns} dataSource={orders} loading={loading} pagination={{
-                current: currentPage, pageSize: 10, total: totalOrders, onChange: (page) => { setCurrentPage(page); }, showTotal: (total) => `共 ${total} 条`, showSizeChanger: false
-              }} bordered scroll={{ x: 'max-content' }} rowKey="id" size="small" className="w-full" />
+                current: currentPage, pageSize: historyPageSize, total: totalOrders, onChange: (page) => { setCurrentPage(page); }, onShowSizeChange: (_page: number, size: number) => { setHistoryPageSize(size); setCurrentPage(1); }, showTotal: (total) => `共 ${total} 条`, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100]
+              }} bordered scroll={{ x: 'max-content' }} rowKey="id" size="small" className="table-enhanced w-full" />
             </Card>
           </Tabs.TabPane>
         </Tabs>
@@ -561,8 +654,8 @@ export default function Home() {
       <Modal title="列映射配置" open={showMappingConfig} onCancel={() => setShowMappingConfig(false)} footer={[
         <Button key="back" onClick={() => setShowMappingConfig(false)}>取消</Button>,
         <Button key="submit" type="primary" onClick={() => handleMappingConfirm(mappings)}>保存并确认</Button>,
-      ]} width={800} destroyOnClose>
-        <Alert message="调整 Excel 列与系统字段的对应关系，修改后点击保存" type="info" showIcon className="mb-4" />
+      ]} width={800} destroyOnClose className="config-modal">
+        <Alert message="调整 Excel 列与系统字段的对应关系，修改后点击保存" type="info" showIcon className="alert-enhanced mb-4" />
         <Table 
           dataSource={headers.map((header, index) => ({
             key: index,
@@ -595,6 +688,7 @@ export default function Home() {
           pagination={false}
           size="small"
           bordered
+          className="table-enhanced"
         />
       </Modal>
     </div>
