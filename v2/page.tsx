@@ -131,7 +131,6 @@ export default function V2Home() {
   const [textLines, setTextLines] = useState<string[] | null>(null);
   const [parsedFile, setParsedFile] = useState<ParsedFileData | null>(null);
   const [parseFailed, setParseFailed] = useState(false);
-  const [autoTriggerAIDirect, setAutoTriggerAIDirect] = useState(false);
   const [aiDirectModalOpen, setAiDirectModalOpen] = useState(false);
   const [aiDirectModalStep, setAiDirectModalStep] = useState('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('');
@@ -286,8 +285,6 @@ export default function V2Home() {
           // 不再弹出 message，由 AI 解析 Modal 统一展示进度
         }
         setActiveMenu('upload');
-        // 标记需要自动触发 AI 直接解析（由 useEffect 处理）
-        setAutoTriggerAIDirect(true);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         message.error(`文件解析失败：${msg}`);
@@ -378,6 +375,12 @@ export default function V2Home() {
       if (!ruleId) {
         setSelectedRuleId('');
         setCurrentRule(null);
+        return;
+      }
+
+      // 必须先上传文件
+      if (!rawRows?.length && !textLines?.length) {
+        message.warning('请先上传文件');
         return;
       }
 
@@ -571,15 +574,6 @@ export default function V2Home() {
       setTimeout(() => { setIsProcessing(false); setUploadProgress(0); setProgressText(''); }, 400);
     }
   }, [rawRows, textLines, parsedFile, loadProvider]);
-
-  /* 文件上传完成后自动触发 AI 直接解析 */
-  useEffect(() => {
-    if (autoTriggerAIDirect && (rawRows?.length || textLines?.length)) {
-      setAutoTriggerAIDirect(false);
-      setSelectedRuleId('__ai_direct__');
-      runAIDirectParse();
-    }
-  }, [autoTriggerAIDirect, rawRows, textLines, runAIDirectParse]);
 
   /* ================================================================ */
   /* Step 4: 表格编辑 / 删除 / 导出 / 提交                             */
