@@ -147,6 +147,12 @@ export default function V2Home() {
   const [items, setItems] = useState<OrderItem[]>([]);
   const [editingCell, setEditingCell] = useState<{ row: number; field: string } | null>(null);
 
+  // 文件改变时重解析：跳过首次挂载 + 用 ref 避免依赖循环
+  const isInitialMount = useRef(true);
+  const selectedRuleIdRef = useRef(selectedRuleId);
+  selectedRuleIdRef.current = selectedRuleId;
+  const handlePickRuleRef = useRef<((ruleId: string) => void) | null>(null);
+
   // 使用 ref 存储 handleCellChange 的最新引用，避免 previewColumns 中的闭包问题
   const handleCellChangeRef = useRef<(rowIndex: number, field: keyof OrderItem, value: string) => void>();
   handleCellChangeRef.current = useCallback(
@@ -272,8 +278,6 @@ export default function V2Home() {
         setTextLines(parsed.textLines || null);
         setFileName(file.name);
         setItems([]);
-        setSelectedRuleId('');
-        setCurrentRule(null);
         setUploadProgress(100);
 
         // 如果文件被截断，提示用户
@@ -574,6 +578,20 @@ export default function V2Home() {
       setTimeout(() => { setIsProcessing(false); setUploadProgress(0); setProgressText(''); }, 400);
     }
   }, [rawRows, textLines, parsedFile, loadProvider]);
+
+  // 更新 handlePickRule ref（放在 useCallback 之后）
+  handlePickRuleRef.current = handlePickRule;
+
+  /* 文件改变时，如果已选中解析规则，重新触发解析 */
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (selectedRuleIdRef.current && (rawRows?.length || textLines?.length)) {
+      handlePickRuleRef.current?.(selectedRuleIdRef.current);
+    }
+  }, [rawRows?.length, textLines?.length]);
 
   /* ================================================================ */
   /* Step 4: 表格编辑 / 删除 / 导出 / 提交                             */
