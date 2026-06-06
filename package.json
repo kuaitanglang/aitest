@@ -6,13 +6,19 @@
     "dev": "next dev -p 3333",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "setup:v2-db": "tsx scripts/setup-v2-db.ts",
+    "seed:v2-rules": "tsx scripts/seed-v2-rules.ts",
+    "test:demos": "tsx scripts/test-demos.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "antd": "^6.3.7",
     "lucide-react": "^0.294.0",
+    "mammoth": "^1.12.0",
     "next": "^14.1.0",
+    "pdfjs-dist": "^6.0.227",
+    "pg": "^8.21.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "xlsx": "^0.18.5",
@@ -20,12 +26,14 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18.2.40",
     "@types/react-dom": "^18.2.17",
     "@types/xlsx": "^0.0.36",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.4.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.3.2"
   }
 }

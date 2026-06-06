@@ -464,8 +464,11 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow-sm">
         <div className="h-[3px] bg-gradient-to-r from-blue-500 to-blue-600" />
-        <div className="px-12 py-[18px] max-w-7xl mx-auto">
+        <div className="px-12 py-[18px] max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-800 m-0 tracking-wide">订单导入系统</h1>
+          <Button type="primary" onClick={() => window.location.href = '/v2'}>
+            万能导入 V2
+          </Button>
         </div>
       </div>
 

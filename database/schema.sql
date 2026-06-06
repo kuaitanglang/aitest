@@ -70,3 +70,82 @@ SELECT column_name, data_type, is_nullable
 FROM information_schema.columns 
 WHERE table_name = 'orders' 
 ORDER BY ordinal_position;
+
+-- ==============================================
+-- V2 版本表结构（万能导入 V2）
+-- ==============================================
+
+-- 创建 V2 解析规则表
+CREATE TABLE IF NOT EXISTS public.v2_parse_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  file_type TEXT NOT NULL CHECK (file_type IN ('excel', 'word', 'pdf')),
+  header_skip_rows INTEGER DEFAULT 0,
+  footer_skip_rows INTEGER DEFAULT 0,
+  data_start_row INTEGER DEFAULT 0,
+  data_end_row INTEGER,
+  skip_patterns TEXT[],
+  aggregate_by TEXT,
+  transpose_config JSONB,
+  parse_mode TEXT DEFAULT 'table',
+  multi_sheet BOOLEAN DEFAULT false,
+  card_marker TEXT,
+  extraction_rules JSONB,
+  field_mappings JSONB,
+  ai_generated BOOLEAN DEFAULT false,
+  ai_confidence NUMERIC,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 创建 V2 订单表
+CREATE TABLE IF NOT EXISTS public.v2_order_items (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  external_code TEXT,
+  store_name TEXT,
+  receiver_name TEXT,
+  receiver_phone TEXT,
+  receiver_address TEXT,
+  sku_code TEXT NOT NULL,
+  sku_name TEXT NOT NULL,
+  sku_quantity TEXT NOT NULL,
+  sku_spec TEXT,
+  remark TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- V2 表索引
+CREATE INDEX IF NOT EXISTS idx_v2_rules_name ON public.v2_parse_rules(name);
+CREATE INDEX IF NOT EXISTS idx_v2_rules_updated_at ON public.v2_parse_rules(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_v2_order_items_external_code ON public.v2_order_items(external_code);
+CREATE INDEX IF NOT EXISTS idx_v2_order_items_created_at ON public.v2_order_items(created_at DESC);
+
+-- V2 表行级安全策略
+ALTER TABLE public.v2_parse_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.v2_order_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "V2规则允许公开读取" ON public.v2_parse_rules FOR SELECT USING (true);
+CREATE POLICY "V2规则允许插入" ON public.v2_parse_rules FOR INSERT WITH CHECK (true);
+CREATE POLICY "V2规则允许更新" ON public.v2_parse_rules FOR UPDATE USING (true);
+CREATE POLICY "V2规则允许删除" ON public.v2_parse_rules FOR DELETE USING (true);
+
+CREATE POLICY "V2订单允许公开读取" ON public.v2_order_items FOR SELECT USING (true);
+CREATE POLICY "V2订单允许插入" ON public.v2_order_items FOR INSERT WITH CHECK (true);
+
+-- V2 规则表更新时间戳触发器
+DROP TRIGGER IF EXISTS update_v2_rules_updated_at ON public.v2_parse_rules;
+CREATE TRIGGER update_v2_rules_updated_at
+    BEFORE UPDATE ON public.v2_parse_rules
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 验证 V2 表是否创建成功
+SELECT 'v2_parse_rules' AS table_name, column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'v2_parse_rules'
+UNION ALL
+SELECT 'v2_order_items' AS table_name, column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'v2_order_items'
+ORDER BY table_name, ordinal_position;
