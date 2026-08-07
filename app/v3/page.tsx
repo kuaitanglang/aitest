@@ -530,14 +530,21 @@ function UploadPageContent() {
             }
             const taskId = createData.task_id;
 
-            // 2. 上传文件 + 激活任务（multipart 经 Vercel 转发到 Supabase Storage）
-            const hideLoading = message.loading('文件上传中，请稍候…', 0);
+            // 2. 上传解析结果（gzip 压缩）+ 激活任务
+            //    不再传原始文件：预解析模式下 Worker 只读取 items，无需原文件；
+            //    且 Vercel 请求体限制 4.5MB，原文件(1-5MB)+items JSON(3-6MB) 会超限。
+            const hideLoading = message.loading('数据上传中，请稍候…', 0);
             try {
               const fileForm = new FormData();
-              fileForm.append('file', fileObj as File);
+              // items：用户确认后的最终数据（含编辑结果），gzip 压缩后发送（10000 条约压缩到 <1MB）
+              const itemsJson = JSON.stringify(items);
+              const gzipBlob = await new Response(
+                new Blob([itemsJson], { type: 'application/json' }).stream().pipeThrough(new CompressionStream('gzip'))
+              ).blob();
+              fileForm.append('items', gzipBlob, 'items.json.gz');
+              fileForm.append('items_gzip', '1');
               fileForm.append('rule_id', selectedRuleId);
-              // items：用户确认后的最终数据（含编辑结果），Worker 走预解析模式保留编辑
-              if (items.length > 0) fileForm.append('items', JSON.stringify(items));
+              fileForm.append('file_name', fileObj?.name || fileName || '数据文件');
 
               const uploadResp = await fetch(`/api/v3/import-tasks/${taskId}/file`, { method: 'POST', body: fileForm });
               const uploadData = await uploadResp.json();
@@ -547,7 +554,7 @@ function UploadPageContent() {
                 router.push(`/v3/tasks/${taskId}`);
               } else {
                 hideLoading();
-                message.error(uploadData.error || '文件上传失败');
+                message.error(uploadData.error || '数据上传失败');
               }
             } catch (err) {
               hideLoading();

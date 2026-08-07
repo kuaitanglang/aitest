@@ -1,25 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { randomUUID } from 'crypto';
+import { gunzipSync } from 'zlib';
 import { writeTrace } from '@/v3/lib/trace';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30; // 大文件上传走 Vercel 转发，允许 30 秒
+export const maxDuration = 30; // 允许 30 秒（items 较大时解压 + 上传 Storage）
 
 /**
  * POST /api/v3/import-tasks/[taskId]/file
- * 上传文件并激活任务（服务端转发到 Supabase Storage）。
+ * 上传解析结果并激活任务（服务端转发到 Supabase Storage）。
  *
- * 背景：前端直连 Supabase Storage 在国内网络极慢（4.3MB 需 80s+），
- * 改为经 Vercel 转发（Vercel CDN 对国内访问更稳定），同时保持
- * "创建任务接口 0-1ms"的快速架构不变。
+ * 背景：
+ *   1. 前端直连 Supabase Storage 在国内网络极慢（4.3MB 需 80s+），改为经 Vercel 转发。
+ *   2. Vercel Serverless 请求体限制 4.5MB：若同时传原始文件（1-5MB）+ items JSON（10000 条约 3-6MB）
+ *      会超限导致上传失败。因此：
+ *      - 原始文件改为可选（预解析模式下 Worker 使用 items，不读取原文件，无需上传）
+ *      - items 在前端 gzip 压缩后传输（10000 条约压缩到 <1MB）
  *
  * 请求体（multipart/form-data）:
- *   file   必填，原始文件（Excel/Word/PDF）
- *   rule_id 必填，解析规则 ID
- *   items  可选，预解析模式最终数据 JSON（AI 直接解析 / 已有规则编辑结果）
+ *   items      必填，解析后的 OrderItem[]（JSON 字符串；若 items_gzip=1 则为 gzip 压缩 Blob）
+ *   rule_id    必填，解析规则 ID
+ *   file       可选，原始文件（仅作存档，预解析模式 Worker 不读取）
+ *   file_name  可选，原始文件名（用于任务展示）
+ *   items_gzip 可选，'1' 表示 items 是 gzip 压缩数据
  *
- * 响应: { ok, task_id, status, total_rows, total_batches }
+ * 响应: { ok, task_id, status, total_rows, total_batches, needWorkerInit }
  */
 export async function POST(
   req: NextRequest,
@@ -35,13 +41,26 @@ export async function POST(
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
     const ruleId = (formData.get('rule_id') as string) || '';
-    const itemsJson = (formData.get('items') as string) || '';
+    const itemsGzip = formData.get('items_gzip') === '1';
+    let itemsJson = (formData.get('items') as string) || '';
+    const sourceFileName = (formData.get('file_name') as string) || '';
 
-    if (!file) {
-      return NextResponse.json({ ok: false, error: '缺少文件' }, { status: 400 });
-    }
     if (!ruleId) {
       return NextResponse.json({ ok: false, error: '缺少 rule_id' }, { status: 400 });
+    }
+
+    // 解压 gzip 压缩的 items（前端 CompressionStream 压缩）
+    if (itemsGzip) {
+      const itemsFile = formData.get('items') as File | null;
+      if (!itemsFile) {
+        return NextResponse.json({ ok: false, error: '缺少 items 压缩数据' }, { status: 400 });
+      }
+      try {
+        const buf = Buffer.from(await itemsFile.arrayBuffer());
+        itemsJson = gunzipSync(buf).toString('utf-8');
+      } catch (e: any) {
+        return NextResponse.json({ ok: false, error: `items 解压失败：${e?.message ?? e}` }, { status: 400 });
+      }
     }
 
     const hasItems = itemsJson.length > 0;
@@ -56,8 +75,12 @@ export async function POST(
       }
     }
 
+    if (!hasItems && !file) {
+      return NextResponse.json({ ok: false, error: '缺少数据：请提供 items（解析结果）或 file（原始文件）' }, { status: 400 });
+    }
+
     /**
-     * 上传文件到 Supabase Storage（服务端转发，Vercel → Supabase 高速网络）
+     * 上传到 Supabase Storage（服务端转发，Vercel → Supabase 高速网络）
      */
     async function uploadToStorage(
       path: string,
@@ -77,21 +100,9 @@ export async function POST(
       }
     }
 
-    // 1. 上传原始文件
-    const ext = (file.name.split('.').pop() || 'xlsx').toLowerCase();
-    const filePath = `${taskId}.${ext}`;
-    const fileBuffer = await file.arrayBuffer();
-    const fileUrl = await uploadToStorage(filePath, fileBuffer, file.type || 'application/octet-stream');
-    if (!fileUrl) {
-      return NextResponse.json({ ok: false, error: '文件上传到存储失败，请重试' }, { status: 500 });
-    }
-
     const traceId = `trace_${randomUUID().slice(0, 12)}`;
-    const storageBase = process.env.NEXT_PUBLIC_SUPABASE_URL
-      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL.replace(/\/+$/, '')}/storage/v1/object/public/import-files`
-      : '';
 
-    // 2. 计算行数与批次（预解析模式从 items 计算；否则交给 Worker initTask）
+    // 1. 上传 items JSON（预解析模式必需，Worker 读取该文件处理）
     let totalRows = 0;
     let totalBatches = 0;
     let itemsUrl = '';
@@ -103,7 +114,6 @@ export async function POST(
       totalRows = items.length;
       totalBatches = Math.max(1, Math.ceil(totalRows / 1000));
 
-      // 上传 items JSON（供 Worker 读取，避免重复解析）
       const itemsPath = `${taskId}_parsed_items.json`;
       const upItemsUrl = await uploadToStorage(itemsPath, Buffer.from(itemsJson, 'utf-8'), 'application/json');
       if (!upItemsUrl) {
@@ -120,8 +130,7 @@ export async function POST(
         const batchPayload: Record<string, any> = {
           task_id: taskId, unit_id: unitId, batch_index: i,
           start_row: startRow, end_row: endRow,
-          rule_id: ruleId, file_url: fileUrl, file_name: file.name, trace_id: traceId,
-          items_url: itemsUrl,
+          rule_id: ruleId, items_url: itemsUrl, trace_id: traceId,
         };
         outboxEvents.push({
           aggregate_id: taskId,
@@ -141,7 +150,7 @@ export async function POST(
         });
       }
     } else {
-      // 非预解析模式：任务创建 + ImportTaskCreated 事件，行数/批次由 Worker initTask 计算
+      // 无 items（纯文件模式）：任务创建 + ImportTaskCreated 事件，行数/批次由 Worker initTask 计算
       outboxEvents.push({
         aggregate_id: taskId,
         event_type: 'ImportTaskCreated',
@@ -154,8 +163,8 @@ export async function POST(
           occurred_at: new Date().toISOString(),
           payload: {
             task_id: taskId,
-            file_url: fileUrl,
-            file_name: file.name,
+            file_url: '',
+            file_name: sourceFileName || file?.name || 'file',
             rule_id: ruleId,
             trace_id: traceId,
           },
@@ -166,11 +175,28 @@ export async function POST(
       });
     }
 
+    // 2. 可选上传原始文件（仅存档；预解析模式 Worker 不读取）
+    let fileUrl = '';
+    let fileName = sourceFileName || '数据文件';
+    if (file) {
+      const ext = (file.name.split('.').pop() || 'xlsx').toLowerCase();
+      const filePath = `${taskId}.${ext}`;
+      fileName = file.name;
+      const upFileUrl = await uploadToStorage(filePath, await file.arrayBuffer(), file.type || 'application/octet-stream');
+      if (!upFileUrl) {
+        return NextResponse.json({ ok: false, error: '文件上传到存储失败，请重试' }, { status: 500 });
+      }
+      fileUrl = upFileUrl;
+    } else if (hasItems) {
+      // 预解析模式无原文件：任务详情中的 file_url 指向解析结果，便于查看
+      fileUrl = itemsUrl;
+    }
+
     // 3. 调用 create_import_task RPC（1 次 HTTP 往返：建任务 + 批次 + outbox）
     const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('create_import_task', {
       p_task: {
         id: taskId,
-        file_name: file.name,
+        file_name: fileName,
         file_url: fileUrl,
         rule_id: ruleId,
         status: 'pending',
@@ -189,7 +215,7 @@ export async function POST(
     }
 
     await writeTrace(traceId, taskId, '', 'ImportTaskActivated', 'success',
-      `文件上传并激活任务，行数: ${totalRows}, 批次: ${totalBatches}`);
+      `解析结果上传并激活任务，行数: ${totalRows}, 批次: ${totalBatches}`);
 
     return NextResponse.json({
       ok: true,
@@ -199,7 +225,6 @@ export async function POST(
       total_rows: totalRows,
       total_batches: totalBatches,
       needWorkerInit: totalBatches === 0,
-      storage_base: storageBase,
       upload_duration_ms: Date.now() - startTime,
     });
   } catch (err: unknown) {
