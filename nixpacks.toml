@@ -1,0 +1,14 @@
+# Nixpacks 构建配置（Railway Worker 专用）
+# 目的：只安装依赖，跳过 Next.js 前端构建，直接以 tsx 启动本地 Worker
+
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = ["npm install --no-audit --no-fund"]
+
+[phases.build]
+cmds = ["echo 'skip next build (worker only)'"]
+
+[start]
+cmd = "npx tsx worker/local-worker.ts"

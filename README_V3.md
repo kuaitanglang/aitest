@@ -1,4 +1,4 @@
-﻿# V3 异步事件驱动批量导入系统
+# V3 异步事件驱动批量导入系统
 
 > 基于 V2 万能导入解析系统的异步事件驱动重构
 
@@ -65,9 +65,35 @@ vercel --prod
 
 ### Railway（Worker 进程）
 
-1. 连接 GitHub 仓库
-2. 设置环境变量（REDIS_URL、NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_ANON_KEY）
-3. 启动命令：`npx tsx worker/index.ts`
+Worker 为常驻进程，部署在 Railway（无需 Redis，直接轮询 `v3_event_outbox` 表消费事件）。
+
+1. 安装 CLI 并登录：
+   ```bash
+   npm install -g @railway/cli
+   railway login --browserless   # 按提示在 railway.com/activate 输入激活码
+   ```
+
+2. 初始化项目并部署：
+   ```bash
+   railway init --name ztocc-worker
+   railway up --service ztocc-worker
+   ```
+   `railway.json` + `nixpacks.toml` 已内置构建/启动配置（Nixpacks 构建，`npx tsx worker/local-worker.ts` 启动）。
+
+3. 配置环境变量：
+   ```bash
+   railway variable set \
+     NEXT_PUBLIC_SUPABASE_URL=... \
+     NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
+     SUPABASE_SERVICE_ROLE_KEY=...
+   ```
+   设置后 Railway 自动重新部署。
+
+4. 验证：`railway logs --service ztocc-worker` 应看到 Worker 启动并轮询。
+
+> 注意：部署前需先在 Supabase Dashboard 执行 `database/_bootstrap-exec-sql.sql`（创建 `exec_sql` RPC），
+> 再执行 `database/v3-rpc-optimize.sql`（创建 `create_import_task` / `init_task_batches` / `batch_upsert_waybills`），
+> 否则 Worker 会回退到逐条 SQL 写入（功能正常，性能略降）。
 
 ### Outbox 投递
 
@@ -80,7 +106,7 @@ Worker 进程（`npm run worker`）直接轮询 `v3_event_outbox` 表并消费�
 | NEXT_PUBLIC_SUPABASE_URL | 是 | Supabase 项目 URL |
 | NEXT_PUBLIC_SUPABASE_ANON_KEY | 是 | Supabase 匿名密钥 |
 | SUPABASE_SERVICE_ROLE_KEY | 是 | Supabase 服务端密钥（Worker 用） |
-| REDIS_URL | 是 | Redis 连接串（Upstash），生产环境必需 |
+| REDIS_URL | 否 | Redis 连接串（仅 BullMQ 模式 `worker/index.ts` 需要，Outbox 轮询模式不需要） |
 | CRON_SECRET | 否 | Cron 端点鉴权密钥 |
 | BASE_URL | 否 | 压测目标地址（默认 http://localhost:3333） |
 | FILE_PATH | 否 | 压测文件路径（默认 test-data/10000-orders.xlsx） |

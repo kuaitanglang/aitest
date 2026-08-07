@@ -1,0 +1,28 @@
+# 依赖与构建产物（不随 railway up 上传）
+node_modules
+.next
+out
+build
+coverage
+
+# 版本控制
+.git
+.gitignore
+
+# 本地运行时数据
+.v2-data
+.v3-uploads
+.reports
+
+# 工具二进制（supabase-go.exe 97MB）
+tools
+
+# 压测数据与报告（体积大且非运行所需）
+test-data
+stress-test-report-*.md
+*.log
+
+# 本地密钥（绝不随代码上传）
+.env
+.env.*
+.env*.local

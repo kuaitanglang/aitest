@@ -32,6 +32,7 @@ async function main() {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/pdf',
         'application/json',
+        'application/octet-stream', // 脚本/压测 Blob 无类型时兜底
       ],
     });
     if (updErr) {
