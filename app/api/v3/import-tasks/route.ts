@@ -98,43 +98,85 @@ export async function POST(req: NextRequest) {
     const fileBuffer = await file.arrayBuffer();
     timings.readFile = Date.now() - tRead;
 
-    // 3. 本地存储辅助
-    const fs = require('fs');
-    const path = require('path');
-    const localDir = path.join(process.cwd(), '.v3-uploads');
-    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-
+    // 3. 文件上传辅助
     const fileExt = fileName.split('.').pop() || 'xlsx';
-    const safeFileName = `${taskId}.${fileExt}`;
-    const localFilePath = path.join(localDir, safeFileName);
+    const storageFileName = `${taskId}.${fileExt}`;
+
+    /**
+     * 上传文件到 Supabase Storage（生产主路径，Web/Worker 解耦）
+     * 失败时回退本地文件（本地开发场景）
+     * @returns Storage public URL 或 null（回退本地）
+     */
+    async function uploadToStorage(
+      path: string,
+      data: ArrayBuffer | Uint8Array,
+      contentType: string
+    ): Promise<string | null> {
+      if (!supabaseAdmin) return null;
+      try {
+        const { error: upErr } = await supabaseAdmin.storage
+          .from('import-files')
+          .upload(path, data, { contentType, upsert: true });
+        if (upErr) throw upErr;
+        return supabaseAdmin.storage.from('import-files').getPublicUrl(path).data.publicUrl;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[upload] Storage 上传失败，回退本地: ${msg}`);
+        return null;
+      }
+    }
 
     // 4. 并行：保存原始文件 + 统计行数/保存解析结果
     let totalRows: number;
     let itemsUrl = '';
     let needWorkerInit = false; // 非预解析模式：行数统计和批次创建交给 Worker
+    let fileUrl = '';
     const tParallel = Date.now();
 
-    // 异步保存原始文件（不阻塞行数统计）
-    const saveFilePromise = fs.promises.writeFile(localFilePath, Buffer.from(fileBuffer));
+    // 4.1 原始文件：优先上传 Supabase Storage
+    const storageUrl = await uploadToStorage(
+      storageFileName,
+      fileBuffer,
+      file.type || 'application/octet-stream'
+    );
+
+    if (storageUrl) {
+      fileUrl = storageUrl;
+    } else {
+      // 回退：本地文件（仅本地开发无 Storage 权限时）
+      const fs = require('fs');
+      const path = require('path');
+      const localDir = path.join(process.cwd(), '.v3-uploads');
+      if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+      const localFilePath = path.join(localDir, storageFileName);
+      await fs.promises.writeFile(localFilePath, Buffer.from(fileBuffer));
+      fileUrl = `local:${localFilePath}`;
+    }
 
     if (hasItems) {
       const parsedItems = JSON.parse(itemsJson) as unknown[];
       totalRows = parsedItems.length;
-      const itemsBuffer = Buffer.from(itemsJson, 'utf-8');
-      const localItemsPath = path.join(localDir, `${taskId}_parsed_items.json`);
-      await Promise.all([
-        saveFilePromise,
-        fs.promises.writeFile(localItemsPath, itemsBuffer),
-      ]);
-      itemsUrl = `local:${localItemsPath}`;
+      // 4.2 预解析结果：优先上传 Supabase Storage
+      const itemsStorageUrl = await uploadToStorage(
+        `${taskId}_parsed_items.json`,
+        Buffer.from(itemsJson, 'utf-8'),
+        'application/json'
+      );
+      if (itemsStorageUrl) {
+        itemsUrl = itemsStorageUrl;
+      } else {
+        const fs = require('fs');
+        const path = require('path');
+        const localItemsPath = path.join(process.cwd(), '.v3-uploads', `${taskId}_parsed_items.json`);
+        await fs.promises.writeFile(localItemsPath, Buffer.from(itemsJson, 'utf-8'));
+        itemsUrl = `local:${localItemsPath}`;
+      }
     } else {
       // 非预解析模式：不在上传接口中统计行数（避免大文件 XLSX 解析耗时）
       // 行数统计和批次创建交给 Worker 的 initTask 完成（考题：上传 P95 ≤ 1s）
       totalRows = 0;
       needWorkerInit = true;
-      await saveFilePromise; // 只等文件保存完成
     }
-    const fileUrl = `local:${localFilePath}`;
     timings.saveAndCount = Date.now() - tParallel;
 
     // 4. 计算分批
