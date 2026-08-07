@@ -42,6 +42,7 @@ import {
   DeleteOutlined, DownloadOutlined, SendOutlined,
 } from '@ant-design/icons';
 import V3Layout from '@/v3/components/V3Layout';
+import { supabase } from '@/lib/supabase';
 import RuleEditor, { loadProvider } from '@/v2/components/RuleEditor';
 import { parseFileByType, exportToExcel } from '@/v2/lib/parser';
 import { executeRuleEngineAsync } from '@/v2/lib/engine';
@@ -516,21 +517,68 @@ function UploadPageContent() {
           submittingRef.current = true;
           setSubmitting(true);
           try {
-            const formData = new FormData();
-            formData.append('file', fileObj as File);
-            // rule_id：真实规则 ID 或 '__ai_direct__'（记录来源）
-            formData.append('rule_id', selectedRuleId);
-            // items：用户确认后的最终数据（含编辑结果），Worker 走预解析模式保留编辑
-            formData.append('items', JSON.stringify(items));
+            // —— 新流程：先创建任务（≤1s 返回 task_id）→ 前端直传 Storage → confirm 激活 ——
+            // 文件不再经 Vercel 中转，大文件上传不阻塞接口响应
+            if (!supabase) {
+              message.error('客户端 Supabase 未配置，无法直传文件');
+              return;
+            }
 
-            const resp = await fetch('/api/v3/import-tasks', { method: 'POST', body: formData });
-            const data = await resp.json();
+            // 1. 创建任务（不传文件，仅 rule_id + items 元数据）
+            const createForm = new FormData();
+            createForm.append('rule_id', selectedRuleId);
+            const createResp = await fetch('/api/v3/import-tasks', { method: 'POST', body: createForm });
+            const createData = await createResp.json();
+            if (!createData.ok || !createData.task_id) {
+              message.error(createData.error || '创建任务失败');
+              return;
+            }
+            const taskId = createData.task_id;
+            const ext = (fileObj?.name.split('.').pop() || 'xlsx').toLowerCase();
+            const filePath = `${taskId}.${ext}`;
 
-            if (data.ok || data.task_id) {
-              message.success(`异步任务创建成功！上传耗时 ${data.upload_duration_ms || 0}ms`);
-              router.push(`/v3/tasks/${data.task_id}`);
+            // 2. 浏览器直传原始文件到 Supabase Storage
+            const { error: upErr } = await supabase.storage
+              .from('import-files')
+              .upload(filePath, fileObj as File, {
+                upsert: true,
+                contentType: (fileObj as File).type || 'application/octet-stream',
+              });
+            if (upErr) {
+              message.error(`文件上传失败：${upErr.message}`);
+              return;
+            }
+
+            // 3. 直传 items（预解析模式：AI 直接解析 / 已有规则编辑后的最终数据）
+            let itemsPath = '';
+            if (items.length > 0) {
+              itemsPath = `${taskId}_parsed_items.json`;
+              const { error: itemsErr } = await supabase.storage
+                .from('import-files')
+                .upload(itemsPath, JSON.stringify(items), { upsert: true, contentType: 'application/json' });
+              if (itemsErr) {
+                message.error(`解析结果上传失败：${itemsErr.message}`);
+                return;
+              }
+            }
+
+            // 4. 激活任务（服务端校验文件存在 → 创建批次 + Outbox 事件）
+            // 注：POST /api/v3/import-tasks/[taskId] 即激活任务（confirm）语义
+            const confirmResp = await fetch(`/api/v3/import-tasks/${taskId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                rule_id: selectedRuleId,
+                file_path: filePath,
+                items_path: itemsPath || undefined,
+              }),
+            });
+            const confirmData = await confirmResp.json();
+            if (confirmData.ok || confirmData.task_id) {
+              message.success(`异步任务创建成功！`);
+              router.push(`/v3/tasks/${taskId}`);
             } else {
-              message.error(data.error || '创建任务失败');
+              message.error(confirmData.error || '任务激活失败');
             }
           } catch (err) {
             message.error('提交请求失败');
