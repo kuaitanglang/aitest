@@ -1,4 +1,4 @@
-export interface OrderItem {
+﻿export interface OrderItem {
   id: string;
   externalCode: string;
   senderName: string;
@@ -52,7 +52,7 @@ export const COLUMN_ALIASES: Record<Exclude<keyof OrderItem, 'createdAt'>, strin
   externalCode: [
     '外部编码', '外部订单号', '订单编号', '外部单号', 
     'external_code', 'order_no', 'orderId', 'trackingNo',
-    '运单号', '快递单号', '物流单号', '单号', 
+    '订单号', '快递单号', '物流单号', '单号', 
     'ExternalCode', 'OrderNo', 'TrackingNumber',
     'Ref Code', 'ref_code', 'refcode', 'Reference Code',
     '外部订单号', '参考编码', '参考号',

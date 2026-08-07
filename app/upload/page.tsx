@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Button, Table, Input, Select, message, Modal, Progress, Card, Tag, Space } from 'antd';
@@ -112,7 +112,7 @@ export default function UploadPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `运单数据_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `订单记录_${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
     message.success('导出成功');
@@ -294,7 +294,7 @@ export default function UploadPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                批量导入运单
+                批量导入订单
               </h1>
               <p className="text-xs text-gray-500">上传Excel → 预览编辑 → 校验提交</p>
             </div>

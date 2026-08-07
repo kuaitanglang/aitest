@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+﻿import * as XLSX from 'xlsx';
 import { OrderItem, SYSTEM_FIELDS, COLUMN_ALIASES, TemplateRule, REQUIRED_FIELDS, TEMPERATURE_OPTIONS, FieldError, OrderItemField, ColumnMapping } from '@/types';
 import { supabase } from '@/lib/supabase';
 
@@ -568,7 +568,7 @@ export function exportToExcel(items: OrderItem[]): Blob {
   
   const worksheet = XLSX.utils.aoa_to_sheet([headers.map((h) => h.label), ...data]);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, '运单数据');
+  XLSX.utils.book_append_sheet(workbook, worksheet, '订单记录');
   
   const arrayBuffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
   return new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useCallback, useEffect } from 'react';
 import { Button, Table, Input, Select, message, Card, Tag, Space } from 'antd';
@@ -90,16 +90,16 @@ export default function HistoryPage() {
               <Button icon={<ArrowLeftOutlined />}>首页</Button>
             </Link>
             <Link href="/upload">
-              <Button icon={<UploadOutlined />} type="primary">导入运单</Button>
+              <Button icon={<UploadOutlined />} type="primary">导入订单</Button>
             </Link>
             <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-teal-600 rounded-xl flex items-center justify-center">
               <RestOutlined className="w-6 h-6 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-bold bg-gradient-to-r from-green-600 to-teal-600 bg-clip-text text-transparent">
-                运单历史记录
+                订单历史记录
               </h1>
-              <p className="text-xs text-gray-500">查看所有已导入的运单数据</p>
+              <p className="text-xs text-gray-500">查看所有已导入的订单记录</p>
             </div>
           </div>
           <Tag color="blue">{totalOrders} 条记录</Tag>
@@ -134,7 +134,7 @@ export default function HistoryPage() {
       <div className="mx-4 mb-8">
         <Card className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200" bordered={false}>
           <div className="text-center py-4">
-            <h3 className="text-lg font-semibold mb-2">需要导入新的运单？</h3>
+            <h3 className="text-lg font-semibold mb-2">需要导入新的订单？</h3>
             <p className="text-gray-600 mb-4">支持多种Excel模板格式，自动识别列映射，智能校验数据</p>
             <Link href="/upload"><Button type="primary" size="large" icon={<UploadOutlined />}>前往导入页面</Button></Link>
           </div>

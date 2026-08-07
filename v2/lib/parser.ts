@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+﻿import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import { ParsedFileData } from '../types';
 
@@ -19,7 +19,7 @@ export async function parseExcelFile(file: File): Promise<ParsedFileData> {
           const sheetData: Record<string, any[][]> = {};
           const allData: any[][] = [];
           let allHeaders: string[] = [];
-          const MAX_PREVIEW_ROWS = 10000; // 限制最大读取行数，防止超大文件卡死
+          const MAX_PREVIEW_ROWS = 100000; // 限制最大读取行数，防止超大文件卡死
 
           for (const sheetName of workbook.SheetNames) {
             const worksheet = workbook.Sheets[sheetName];
@@ -139,7 +139,7 @@ export function exportToExcel(items: import('../types').OrderItem[]): Blob {
 
   const worksheet = XLSX.utils.aoa_to_sheet(data);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, '运单数据');
+  XLSX.utils.book_append_sheet(workbook, worksheet, '订单记录');
   const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
   return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }

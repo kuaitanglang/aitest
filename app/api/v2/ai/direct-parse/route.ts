@@ -108,7 +108,21 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     const msg = err?.message ?? String(err);
-    console.error('[direct-parse] 失败:', msg.slice(0, 500));
-    return NextResponse.json({ ok: false, error: msg }, { status: 502 });
+    const cause = err?.cause?.message || '';
+    console.error('[direct-parse] 失败:', msg.slice(0, 500), cause ? `cause: ${cause}` : '');
+
+    // 提供更友好的错误提示
+    let userFriendlyError = msg;
+    if (msg.includes('fetch failed') || msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED')) {
+      userFriendlyError = `无法连接到 AI 服务，请检查 API Base URL 配置是否正确。${cause ? `（原因：${cause}）` : ''}`;
+    } else if (msg.includes('timeout') || msg.includes('Timeout')) {
+      userFriendlyError = 'AI 解析超时（超过 120 秒），请尝试减少数据量或更换更快的模型。';
+    } else if (msg.includes('401') || msg.includes('403')) {
+      userFriendlyError = 'AI API Key 无效或无权限，请检查 API Key 配置。';
+    } else if (msg.includes('429')) {
+      userFriendlyError = 'AI API 请求频率超限，请稍后再试。';
+    }
+
+    return NextResponse.json({ ok: false, error: userFriendlyError, detail: msg }, { status: 502 });
   }
 }

@@ -90,9 +90,9 @@ type AIProviderConfig = {
 };
 
 const DEFAULT_PROVIDER: AIProviderConfig = {
-  baseUrl: 'https://api.deepseek.com',
-  apiKey: 'sk-994136d2e30c491c8100b9b9e8dc3729',
-  model: 'deepseek-chat',
+  baseUrl: process.env.NEXT_PUBLIC_AI_BASE_URL || 'https://api.deepseek.com',
+  apiKey: process.env.NEXT_PUBLIC_AI_API_KEY || '',
+  model: process.env.NEXT_PUBLIC_AI_MODEL || 'deepseek-chat',
   temperature: 0.2,
   sampleRowLimit: 100,
 };

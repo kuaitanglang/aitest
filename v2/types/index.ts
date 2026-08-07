@@ -1,4 +1,4 @@
-export type ParseMode = 'table' | 'card' | 'transpose' | 'text';
+﻿export type ParseMode = 'table' | 'card' | 'transpose' | 'text';
 
 export interface ParseRule {
   id: string;
@@ -134,7 +134,7 @@ export const REQUIRED_FIELDS: OrderField[] = ['skuCode', 'skuName', 'skuQuantity
 export const FIELD_ALIASES: Record<OrderField, string[]> = {
   externalCode: [
     '外部编码', '外部订单号', '订单编号', '外部单号',
-    'order_no', 'orderId', '运单号', '快递单号', '物流单号', '单号',
+    'order_no', 'orderId', '订单号', '快递单号', '物流单号', '单号',
     '配送单号', '参考编码', '参考号', '客户单号', '客户订单号',
     '内部订单号', '订单号', '外部编号', '配送汇总单号', '单据号',
   ],

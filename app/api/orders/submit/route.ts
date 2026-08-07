@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { OrderItem, OrderItemField } from '@/types';
 import { validateOrderItem } from '@/lib/excel';
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
-        { success: false, error: '请提供有效的运单数据' },
+        { success: false, error: '请提供有效的订单记录' },
         { status: 400 }
       );
     }

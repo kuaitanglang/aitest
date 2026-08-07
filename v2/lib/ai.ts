@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 大模型（LLM）接入层
  * ---------------------
  * 设计目标：
@@ -36,7 +36,7 @@ export function detectHeaderRow(rows: any[][]): number {
     '收货人', '收件人', '联系人', '收方',
     '电话', '手机', '联系方式', '联系电话',
     '地址', '详细地址', '收货地址',
-    '日期', '时间', '单号', '订单', '运单', '配送', '外部',
+    '日期', '时间', '单号', '订单', '订单', '配送', '外部',
     '外部编码', '外部订单', '客户单号', '配送汇总', '单据号',
     '物品类别', '物品编码', '物品名称', '规格型号', '订货单位', '发货数量',
   ];
@@ -249,7 +249,7 @@ function buildPrompt(input: AISuggestRuleInput): {
     `转换成一套**精确可执行**的结构化解析规则。`,
     ``,
     `## 目标系统字段（targetField 枚举）`,
-    `- externalCode  : 订单/运单/单据的外部编号（如"运单号"、"订单号"、"配送单号"）`,
+    `- externalCode  : 订单/订单/单据的外部编号（如"订单号"、"订单号"、"配送单号"）`,
     `- storeName     : 收货门店 / 机构名称 / 店铺名称`,
     `- receiverName  : 收件人姓名 / 联系人`,
     `- receiverPhone : 收件人电话（手机号 / 座机）`,
@@ -480,6 +480,7 @@ export async function suggestRuleWithLLM(input: AISuggestRuleInput): Promise<{
     model: provider.model!,
     messages,
     temperature: provider.temperature,
+    max_tokens: 8192,
     response_format: { type: 'json_object' },
   };
 
@@ -824,8 +825,8 @@ function buildDirectParsePrompt(input: AIDirectParseInput): {
     fileContentText = content;
     lineCount = textLines.length;
   } else {
-    // Excel 模式：把二维数组转为文本展示
-    const displayRows = (rows || []).slice(0, 200); // 最多 200 行
+    // Excel 模式：把二维数组转为文本展示（限制行数避免 AI 输出超出 token 上限）
+    const displayRows = (rows || []).slice(0, 100); // 最多 100 行
     fileContentText = displayRows.map((row, idx) => {
       const cells = (row || []).map((c: any) => {
         const s = String(c ?? '').trim();
@@ -834,8 +835,8 @@ function buildDirectParsePrompt(input: AIDirectParseInput): {
       return `[行${idx + 1}] ${cells.join(' | ')}`;
     }).join('\n');
     lineCount = displayRows.length;
-    if ((rows || []).length > 200) {
-      fileContentText += `\n... (共 ${(rows || []).length} 行，已截断显示前 200 行)`;
+    if ((rows || []).length > 100) {
+      fileContentText += `\n... (共 ${(rows || []).length} 行，已截断显示前 100 行)`;
     }
   }
 
@@ -850,7 +851,7 @@ function buildDirectParsePrompt(input: AIDirectParseInput): {
     ``,
     `  字段名        含义                     示例值`,
     `  ────────────────────────────────────────────────────────`,
-    `  externalCode  外部编码/订单号/运单号     "PH20240606001" 或 ""`,
+    `  externalCode  外部编码/订单号/订单号     "PH20240606001" 或 ""`,
     `  storeName     收货门店/机构名称          "黔寨寨贵州烙锅（鞍山店）" 或 ""`,
     `  receiverName  收件人姓名/联系人         "张三" 或 ""`,
     `  receiverPhone 收件人电话/手机           "13800138000" 或 ""`,
@@ -905,7 +906,7 @@ function buildDirectParsePrompt(input: AIDirectParseInput): {
     `- **receiverName（收件人）**：搜索 "收件人"、"收货人"、"联系人"、"客户" 等关键词附近`,
     `- **receiverPhone（电话）**：搜索手机号（1开头11位数字）、"电话"、"联系方式"、"手机" 等`,
     `- **receiverAddress（地址）**：搜索 "地址"、"详细地址"、"配送地址" 等关键词附近的长文本`,
-    `- **externalCode（外部编码）**：搜索 "单号"、"订单号"、"运单号"、"配送单号"、"单据编号" 等`,
+    `- **externalCode（外部编码）**：搜索 "单号"、"订单号"、"订单号"、"配送单号"、"单据编号" 等`,
     ``,
     `⚠️ 搜索不到就留空字符串 ""，不要编造数据。`,
     ``,
@@ -953,6 +954,7 @@ function buildDirectParsePrompt(input: AIDirectParseInput): {
     ``,
     userHint ? `## 用户补充提示\n${userHint}\n` : '',
     `请分析上面的文件内容，直接输出解析后的订单数据 JSON。`,
+    `注意：输出紧凑格式的JSON（不要多余的空格和换行），确保items数组完整不被截断。`,
   ].join('\n');
 
   const messages: ChatMessage[] = [
@@ -991,6 +993,7 @@ export async function parseWithAIDirect(input: AIDirectParseInput): Promise<{
     model: provider.model!,
     messages,
     temperature: provider.temperature,
+    max_tokens: 8192,
     response_format: { type: 'json_object' },
   };
 
@@ -1064,6 +1067,25 @@ export async function parseWithAIDirect(input: AIDirectParseInput): Promise<{
     const aF = aggressive.indexOf('{');
     const aL = aggressive.lastIndexOf('}');
     if (aF >= 0 && aL > aF) parsed = tryParse(aggressive.slice(aF, aL + 1));
+  }
+  // Level 4: 截断修复 — AI 输出超 token 限制导致 JSON 被截断
+  if (!parsed) {
+    // 找到最后一个完整对象（以 } 结尾），截断后面的不完整内容
+    const lastComplete = cleaned.lastIndexOf('}');
+    if (lastComplete > 0) {
+      let truncated = cleaned.slice(0, lastComplete + 1);
+      // 统计未闭合的括号
+      const opens = (truncated.match(/{/g) || []).length;
+      const closes = (truncated.match(/}/g) || []).length;
+      const arrOpens = (truncated.match(/\[/g) || []).length;
+      const arrCloses = (truncated.match(/\]/g) || []).length;
+      // 补齐缺失的闭合符号
+      truncated += ']'.repeat(Math.max(0, arrOpens - arrCloses));
+      truncated += '}'.repeat(Math.max(0, opens - closes));
+      // 尾随逗号清理
+      truncated = truncated.replace(/,\s*([}\]])/g, '$1').replace(/,\s*}/g, '}');
+      try { parsed = JSON.parse(truncated); } catch { /* still failed */ }
+    }
   }
 
   if (!parsed) {

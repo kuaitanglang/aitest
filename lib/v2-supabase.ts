@@ -268,7 +268,7 @@ function orderFromDb(row: Record<string, unknown>): OrderItem {
   };
 }
 
-function orderToDb(item: OrderItem): Record<string, unknown> {
+export function orderToDb(item: OrderItem): Record<string, unknown> {
   return {
     external_code: item.externalCode?.trim() || null,
     store_name: item.storeName?.trim() || null,
