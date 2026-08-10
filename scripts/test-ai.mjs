@@ -40,7 +40,7 @@ async function testFile(fileName) {
       userHint: '',
       provider: {
         baseUrl: 'https://api.deepseek.com',
-        apiKey: process.env.DEEPSEEK_KEY || 'sk-88ba3e847fc84eab96f13e0c231f016c',
+        apiKey: process.env.DEEPSEEK_KEY || '',
         model: 'deepseek-chat',
         temperature: 0.2,
         sampleRowLimit: 50,
